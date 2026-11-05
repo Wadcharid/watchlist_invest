@@ -61,22 +61,64 @@ def get_stockanalysis_url(symbol: str, quote_type: str) -> str:
     else:
         return f"https://stockanalysis.com/stocks/{clean_sym}/"
 
-def parse_dividend_yield(info: dict) -> float | None:
-    """Parse dividend yield into a standardized percentage value."""
-    div_yield = info.get("dividendYield")
-    if div_yield is not None and not pd.isna(div_yield):
-        val = float(div_yield)
-        if val > 0:
-            return round(val, 2)
-            
+def calculate_best_dividend_yield(ticker, info: dict, price: float | None, quote_type: str) -> float | None:
+    """
+    Calculate accurate dividend/distribution yield matching StockAnalysis.com.
+    For covered-call/options-income ETFs (like SPYI, IAUI), Yahoo's info.dividendYield often
+    only reports 30-day SEC yield (e.g. 1.43%) rather than actual total distributions (~12%).
+    We examine historical 12-month distributions to get the true yield.
+    """
+    dy_info = info.get("dividendYield")
+    if dy_info is not None:
+        try:
+            dy_info = float(dy_info)
+        except Exception:
+            dy_info = None
+
+    ttm_yield = None
+    try:
+        divs = ticker.dividends
+        if not divs.empty and price and price > 0:
+            if divs.index.tz is not None:
+                one_yr = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
+                recent = divs[divs.index >= one_yr]
+            else:
+                recent = divs[divs.index >= (pd.Timestamp.now() - pd.Timedelta(days=365))]
+            if not recent.empty:
+                s = float(recent.sum())
+                if s > 0:
+                    ttm_yield = round((s / float(price)) * 100, 2)
+    except Exception:
+        pass
+
+    # For ETFs (especially options-income/covered-call like SPYI):
+    # Prefer actual distribution yield if higher than SEC yield
+    if quote_type == "ETF":
+        if ttm_yield is not None and (dy_info is None or ttm_yield > dy_info):
+            return ttm_yield
+        if dy_info is not None and dy_info > 0:
+            return round(dy_info, 2)
+
+    # For common stocks / equities:
+    # Prefer forward dividend yield from info if available
+    if dy_info is not None and dy_info > 0:
+        return round(dy_info, 2)
+
+    if ttm_yield is not None and ttm_yield > 0:
+        return ttm_yield
+
+    # Fallback to trailingAnnualDividendYield
     trailing = info.get("trailingAnnualDividendYield")
-    if trailing is not None and not pd.isna(trailing):
-        val = float(trailing)
-        if 0 < val < 1:
-            return round(val * 100, 2)
-        elif val >= 1:
-            return round(val, 2)
-            
+    if trailing is not None:
+        try:
+            t_val = float(trailing)
+            if 0 < t_val < 1:
+                return round(t_val * 100, 2)
+            elif t_val >= 1:
+                return round(t_val, 2)
+        except Exception:
+            pass
+
     return None
 
 def fetch_symbol_data(raw_symbol: str) -> dict:
@@ -99,15 +141,6 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
     # Price and Change
     price = info.get("regularMarketPrice") or info.get("currentPrice")
     change_pct = info.get("regularMarketChangePercent")
-    
-    # P/E Ratio
-    pe = info.get("trailingPE")
-    if pe is None or pd.isna(pe):
-        pe = info.get("forwardPE")
-    pe = round(float(pe), 2) if pe is not None and not pd.isna(pe) and pe > 0 else None
-    
-    # Dividend Yield (%)
-    div_yield = parse_dividend_yield(info)
     
     # Fetch historical data for RSI calculations
     rsi_daily = None
@@ -144,6 +177,15 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
     # Standardize values
     price_val = round(float(price), 2) if price is not None and not pd.isna(price) else None
     change_val = round(float(change_pct), 2) if change_pct is not None and not pd.isna(change_pct) else 0.0
+
+    # P/E Ratio
+    pe = info.get("trailingPE")
+    if pe is None or pd.isna(pe):
+        pe = info.get("forwardPE")
+    pe = round(float(pe), 2) if pe is not None and not pd.isna(pe) and pe > 0 else None
+    
+    # Dividend Yield (%) with smart covered-call / ETF distribution detection
+    div_yield = calculate_best_dividend_yield(ticker, info, price_val, quote_type)
 
     stockanalysis_url = direct_sa_url if direct_sa_url else get_stockanalysis_url(display_symbol, quote_type)
 
