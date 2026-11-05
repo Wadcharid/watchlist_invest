@@ -169,13 +169,13 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
     price = info.get("regularMarketPrice") or info.get("currentPrice")
     change_pct = info.get("regularMarketChangePercent")
     
-    # Fetch historical data for RSI calculations
+    # Fetch historical data for RSI calculations using auto_adjust=False (Real Market Price / TradingView standard)
     rsi_daily = None
     rsi_weekly = None
     rsi_monthly = None
     
     try:
-        df_daily = ticker.history(period="6mo", interval="1d")
+        df_daily = ticker.history(period="2y", interval="1d", auto_adjust=False)
         if not df_daily.empty and "Close" in df_daily:
             rsi_daily = calculate_rsi(df_daily["Close"])
             if price is None:
@@ -188,14 +188,14 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
         print(f"Warning: error calculating daily RSI for {yf_symbol}: {e}")
 
     try:
-        df_weekly = ticker.history(period="2y", interval="1wk")
+        df_weekly = ticker.history(period="5y", interval="1wk", auto_adjust=False)
         if not df_weekly.empty and "Close" in df_weekly:
             rsi_weekly = calculate_rsi(df_weekly["Close"])
     except Exception as e:
         print(f"Warning: error calculating weekly RSI for {yf_symbol}: {e}")
 
     try:
-        df_monthly = ticker.history(period="5y", interval="1mo")
+        df_monthly = ticker.history(period="max", interval="1mo", auto_adjust=False)
         if not df_monthly.empty and "Close" in df_monthly:
             rsi_monthly = calculate_rsi(df_monthly["Close"])
     except Exception as e:
