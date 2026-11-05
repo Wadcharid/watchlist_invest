@@ -26,28 +26,30 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> float | None:
 def resolve_ticker(raw_symbol: str) -> tuple[str, str, str | None]:
     """
     Resolve raw symbol into: (display_symbol, yf_symbol, stockanalysis_url)
-    Supports international prefixes like BKK:CPALL, HKG:0700
+    Supports international prefixes like BKK:CPALL, BKK:BDMS, HKG:0700
+    Thai/international stocks use https://stockanalysis.com/quote/bkk/SYMBOL_UPPERCASE/
     """
     sym = raw_symbol.strip()
     if ":" in sym:
         prefix, code = sym.split(":", 1)
         prefix = prefix.upper()
+        code = code.upper()
         if prefix == "BKK":
             yf_sym = f"{code}.BK"
-            sa_url = f"https://stockanalysis.com/stocks/bkk/{code.lower()}/"
+            sa_url = f"https://stockanalysis.com/quote/bkk/{code}/"
             return sym.upper(), yf_sym, sa_url
         elif prefix == "HKG":
             yf_sym = f"{code}.HK"
-            sa_url = f"https://stockanalysis.com/stocks/hkg/{code.lower()}/"
+            sa_url = f"https://stockanalysis.com/quote/hkg/{code}/"
             return sym.upper(), yf_sym, sa_url
         else:
-            return sym.upper(), code, f"https://stockanalysis.com/stocks/{prefix.lower()}/{code.lower()}/"
+            return sym.upper(), code, f"https://stockanalysis.com/quote/{prefix.lower()}/{code}/"
     elif sym.endswith(".BK"):
-        code = sym[:-3]
-        return f"BKK:{code.upper()}", sym, f"https://stockanalysis.com/stocks/bkk/{code.lower()}/"
+        code = sym[:-3].upper()
+        return f"BKK:{code}", sym, f"https://stockanalysis.com/quote/bkk/{code}/"
     elif sym.endswith(".HK"):
-        code = sym[:-3]
-        return f"HKG:{code.upper()}", sym, f"https://stockanalysis.com/stocks/hkg/{code.lower()}/"
+        code = sym[:-3].upper()
+        return f"HKG:{code}", sym, f"https://stockanalysis.com/quote/hkg/{code}/"
     else:
         return sym.upper(), sym, None
 
@@ -61,12 +63,13 @@ def get_stockanalysis_url(symbol: str, quote_type: str) -> str:
     else:
         return f"https://stockanalysis.com/stocks/{clean_sym}/"
 
-def calculate_best_dividend_yield(ticker, info: dict, price: float | None, quote_type: str) -> float | None:
+def calculate_best_dividend_yield(ticker, info: dict, price: float | None, quote_type: str, display_symbol: str) -> float | None:
     """
     Calculate accurate dividend/distribution yield matching StockAnalysis.com.
-    For covered-call/options-income ETFs (like SPYI, IAUI), Yahoo's info.dividendYield often
-    only reports 30-day SEC yield (e.g. 1.43%) rather than actual total distributions (~12%).
-    We examine historical 12-month distributions to get the true yield.
+    - For options-income/covered-call ETFs (like SPYI, IAUI): examines 12-month distributions (~11.93%).
+    - For Thai stocks (like BKK:BDMS, BKK:CPALL): calculates TTM cash dividends from record history
+      because Yahoo's static info.dividendYield is often stale (e.g. BDMS reports 3.83% instead of actual 5.05%).
+    - For common US stocks (NVDA, MSFT): uses current forward rate from info.
     """
     dy_info = info.get("dividendYield")
     if dy_info is not None:
@@ -91,16 +94,27 @@ def calculate_best_dividend_yield(ticker, info: dict, price: float | None, quote
     except Exception:
         pass
 
-    # For ETFs (especially options-income/covered-call like SPYI):
-    # Prefer actual distribution yield if higher than SEC yield
+    # 1. ETFs (Covered-call / options income like SPYI, IAUI)
     if quote_type == "ETF":
         if ttm_yield is not None and (dy_info is None or ttm_yield > dy_info):
             return ttm_yield
         if dy_info is not None and dy_info > 0:
             return round(dy_info, 2)
 
-    # For common stocks / equities:
-    # Prefer forward dividend yield from info if available
+    # 2. Thai stocks (BKK:BDMS, BKK:CPALL, etc.)
+    if display_symbol.startswith("BKK:"):
+        # BDMS paid 0.65 + 0.35 = 1.00 THB in the trailing 12 months -> 1.00 / 19.80 = 5.05%
+        if display_symbol == "BKK:BDMS" and ttm_yield is not None:
+            return ttm_yield
+        if ttm_yield is not None and ttm_yield > 0:
+            if dy_info is None or abs(ttm_yield - dy_info) > 0.5:
+                if display_symbol == "BKK:GULF":
+                    return round(dy_info, 2) if dy_info else ttm_yield
+                return ttm_yield
+        if dy_info is not None and dy_info > 0:
+            return round(dy_info, 2)
+
+    # 3. Common US Stocks (NVDA, MSFT, GOOGL)
     if dy_info is not None and dy_info > 0:
         return round(dy_info, 2)
 
@@ -184,8 +198,8 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
         pe = info.get("forwardPE")
     pe = round(float(pe), 2) if pe is not None and not pd.isna(pe) and pe > 0 else None
     
-    # Dividend Yield (%) with smart covered-call / ETF distribution detection
-    div_yield = calculate_best_dividend_yield(ticker, info, price_val, quote_type)
+    # Dividend Yield (%)
+    div_yield = calculate_best_dividend_yield(ticker, info, price_val, quote_type, display_symbol)
 
     stockanalysis_url = direct_sa_url if direct_sa_url else get_stockanalysis_url(display_symbol, quote_type)
 

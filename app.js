@@ -116,7 +116,7 @@ function getStockAnalysisUrl(symbol, type) {
   const sym = symbol.trim();
   if (sym.includes(':')) {
     const parts = sym.split(':');
-    return `https://stockanalysis.com/stocks/${parts[0].toLowerCase()}/${parts[1].toLowerCase()}/`;
+    return `https://stockanalysis.com/quote/${parts[0].toLowerCase()}/${parts[1].toUpperCase()}/`;
   }
   const cleanSym = symbol.toLowerCase().replace('-usd', '').replace('^', '').trim();
   if (type === 'ETF') {
