@@ -26,6 +26,12 @@ const addAssetForm = document.getElementById('addAssetForm');
 const newSymbolInput = document.getElementById('newSymbolInput');
 const lastUpdatedText = document.getElementById('lastUpdatedText');
 
+// Banner Elements
+const pendingSyncBanner = document.getElementById('pendingSyncBanner');
+const pendingCount = document.getElementById('pendingCount');
+const pendingListText = document.getElementById('pendingListText');
+const btnQuickSync = document.getElementById('btnQuickSync');
+
 // Stat Elements
 const statTotalCount = document.getElementById('statTotalCount');
 const statGainersCount = document.getElementById('statGainersCount');
@@ -164,7 +170,10 @@ function initWatchlist() {
     if (allStocksData.length > 0) {
       userWatchlist = allStocksData.map(a => a.symbol.toUpperCase());
     } else {
-      userWatchlist = ['AAPL', 'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'SPY', 'QQQ', 'VOO', 'SCHD', 'IBIT', 'BTC-USD'];
+      userWatchlist = [
+        'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'SCHD', 'BTC-USD', 'TSM',
+        'SPYI', 'VYMI', 'BKK:CPALL', 'BKK:BDMS', 'BKK:GULF', 'IAUI', 'HKG:0700'
+      ];
     }
     saveWatchlist();
   }
@@ -194,7 +203,7 @@ function addAsset(rawSymbol) {
   if (existsInData) {
     showToast(`✅ เพิ่ม ${symbol} เข้าสู่ Watchlist เรียบร้อย`);
   } else {
-    showToast(`✅ เพิ่ม ${symbol} แล้ว! (กด 'จัดการ Watchlist' เพื่อซิงก์อัปเดตข้อมูลบน GitHub)`);
+    showToast(`✅ เพิ่ม ${symbol} แล้ว! กดปุ่ม 'ซิงก์ GitHub & คำนวณข้อมูล' ด้านบนเพื่อให้ระบบดึงราคาและ RSI`, 6000);
   }
 
   render();
@@ -275,6 +284,18 @@ function getFilteredAndSortedData() {
 // Render Table
 function render() {
   const items = getFilteredAndSortedData();
+
+  // Update Pending Sync Banner
+  const pendingTickers = userWatchlist.filter(sym => !allStocksData.some(a => a.symbol === sym));
+  if (pendingSyncBanner) {
+    if (pendingTickers.length > 0) {
+      pendingSyncBanner.style.display = 'flex';
+      if (pendingCount) pendingCount.textContent = pendingTickers.length;
+      if (pendingListText) pendingListText.textContent = pendingTickers.join(', ');
+    } else {
+      pendingSyncBanner.style.display = 'none';
+    }
+  }
   
   // Update Stats
   updateStats();
@@ -300,7 +321,12 @@ function render() {
             <span class="asset-name" title="${item.name || item.symbol}">${item.name || item.symbol}</span>
           </div>
         </td>
-        <td class="text-right mono-num">${formatPrice(item.price, item.currency)}</td>
+        <td class="text-right mono-num">
+          ${item.price !== null 
+            ? formatPrice(item.price, item.currency) 
+            : `<button class="btn-sync-pill" onclick="handleQuickSync()" title="กดเพื่อสั่งให้ GitHub Actions คำนวณข้อมูล">⏳ รอคำนวณ</button>`
+          }
+        </td>
         <td class="text-right">${formatChange(item.change_pct)}</td>
         <td class="text-right">${formatPE(item.pe)}</td>
         <td class="text-center">${formatRSI(item.rsi_daily)}</td>
@@ -391,7 +417,7 @@ document.querySelectorAll('th.sortable').forEach(th => {
       currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
     } else {
       currentSort.column = col;
-      currentSort.order = col === 'symbol' ? 'asc' : 'desc'; // Default desc for numbers, asc for symbol
+      currentSort.order = col === 'symbol' ? 'asc' : 'desc';
     }
     render();
   });
@@ -459,7 +485,86 @@ btnResetWatchlist.addEventListener('click', () => {
   }
 });
 
-// GitHub API Direct Sync
+// Quick Sync Action
+async function handleQuickSync() {
+  const token = localStorage.getItem(STORAGE_KEYS.GITHUB_PAT) || '';
+  if (!token) {
+    btnOpenSync.click();
+    showToast('กรุณากรอก GitHub Token ในช่องด้านล่าง แล้วกดซิงก์ข้อมูล', 5000);
+    return;
+  }
+
+  if (btnQuickSync) btnQuickSync.innerHTML = '<span>⏳ กำลังบันทึกและสั่งรัน GitHub Actions...</span>';
+  showToast('⏳ กำลังส่งข้อมูลไปยัง GitHub เพื่อเริ่มคำนวณ...', 4000);
+
+  try {
+    const getRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+    let sha = null;
+    if (getRes.ok) {
+      const getData = await getRes.json();
+      sha = getData.sha;
+    }
+
+    const contentBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(userWatchlist, null, 2) + '\n')));
+    const putRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: 'Update watchlist.json from web UI',
+        content: contentBase64,
+        sha: sha
+      })
+    });
+
+    if (!putRes.ok) {
+      const err = await putRes.json();
+      throw new Error(`บันทึกไฟล์ไม่สำเร็จ: ${err.message}`);
+    }
+
+    const dispatchRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/update_data.yml/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ ref: 'main' })
+    });
+
+    if (!dispatchRes.ok && dispatchRes.status !== 204) {
+      const err = await dispatchRes.json();
+      throw new Error(`สั่งรัน Workflow ไม่สำเร็จ: ${err.message}`);
+    }
+
+    if (btnQuickSync) btnQuickSync.innerHTML = '<span>✅ เริ่มคำนวณแล้ว (รอ 1-2 นาที ข้อมูลจะแสดง)</span>';
+    showToast('🚀 สั่งรัน GitHub Actions สำเร็จแล้ว! ระบบจะดึงราคาและคำนวณ RSI ในอีก 1-2 นาที', 6000);
+    
+    // Auto reload data
+    setTimeout(loadData, 45000);
+    setTimeout(loadData, 75000);
+    setTimeout(loadData, 105000);
+  } catch (err) {
+    console.error(err);
+    alert(`ข้อผิดพลาด: ${err.message}`);
+    if (btnQuickSync) btnQuickSync.innerHTML = '<span>❌ ไม่สำเร็จ (คลิกเพื่อลองใหม่)</span>';
+  }
+}
+window.handleQuickSync = handleQuickSync;
+
+if (btnQuickSync) {
+  btnQuickSync.addEventListener('click', handleQuickSync);
+}
+
+// GitHub API Direct Sync Modal
 btnSyncToGitHub.addEventListener('click', async () => {
   const token = githubTokenInput.value.trim();
   if (!token) {
@@ -471,7 +576,6 @@ btnSyncToGitHub.addEventListener('click', async () => {
   syncStatus.textContent = 'กำลังติดต่อ GitHub API...';
 
   try {
-    // 1. Get SHA of data/watchlist.json
     const getRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -485,7 +589,6 @@ btnSyncToGitHub.addEventListener('click', async () => {
       sha = getData.sha;
     }
 
-    // 2. Commit updated watchlist.json
     syncStatus.textContent = 'กำลังบันทึก data/watchlist.json ไปยัง Repository...';
     const contentBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(userWatchlist, null, 2) + '\n')));
     
@@ -508,7 +611,6 @@ btnSyncToGitHub.addEventListener('click', async () => {
       throw new Error(`บันทึกไฟล์ไม่สำเร็จ: ${err.message}`);
     }
 
-    // 3. Trigger workflow dispatch
     syncStatus.textContent = 'กำลังสั่งรัน GitHub Actions Workflow...';
     const dispatchRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/update_data.yml/dispatches`, {
       method: 'POST',
@@ -529,6 +631,9 @@ btnSyncToGitHub.addEventListener('click', async () => {
 
     syncStatus.textContent = '✅ ซิงก์และสั่งรัน Workflow สำเร็จ! ข้อมูลจะอัปเดตใน 1-2 นาที';
     showToast('🚀 ส่งคำสั่งอัปเดตไปยัง GitHub เรียบร้อยแล้ว');
+    
+    setTimeout(loadData, 45000);
+    setTimeout(loadData, 75000);
   } catch (err) {
     console.error(err);
     syncStatus.textContent = `❌ เกิดข้อผิดพลาด: ${err.message}`;

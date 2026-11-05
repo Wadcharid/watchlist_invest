@@ -117,6 +117,23 @@
       </div>
     </section>
 
+    <!-- Pending Sync Alert Banner -->
+    <div id="pendingSyncBanner" class="pending-banner" style="display: none;">
+      <div class="pending-content">
+        <span class="pending-icon">⚠️</span>
+        <div>
+          <div style="font-weight: 700; color: #fbbf24;">มีสินทรัพย์ใหม่ที่รอคำนวณข้อมูล (<span id="pendingCount">0</span> รายการ): <span id="pendingListText" style="font-family: var(--font-mono); color: #fff;"></span></div>
+          <p class="pending-subtext">เนื่องจากเป็นเว็บ Static บน GitHub ข้อมูลราคา, RSI และตัวชี้วัดจะถูกคำนวณผ่าน GitHub Actions กรุณากดปุ่มด้านขวาเพื่อเริ่มคำนวณทันที (ใช้เวลาประมาณ 1-2 นาที)</p>
+        </div>
+      </div>
+      <button id="btnQuickSync" class="btn btn-primary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+        </svg>
+        <span>ซิงก์ GitHub & คำนวณข้อมูลทันที</span>
+      </button>
+    </div>
+
     <!-- Main Table Container -->
     <main class="table-card">
       <div class="table-responsive">
