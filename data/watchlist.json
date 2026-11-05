@@ -1,15 +1,16 @@
 [
-  "AAPL",
   "NVDA",
   "MSFT",
   "GOOGL",
   "AMZN",
-  "META",
-  "TSLA",
-  "SPY",
-  "QQQ",
-  "VOO",
   "SCHD",
-  "IBIT",
-  "BTC-USD"
+  "BTC-USD",
+  "TSM",
+  "SPYI",
+  "VYMI",
+  "BKK:CPALL",
+  "BKK:BDMS",
+  "BKK:GULF",
+  "IAUI",
+  "HKG:0700"
 ]
