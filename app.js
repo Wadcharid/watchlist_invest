@@ -61,7 +61,11 @@ function showToast(message, duration = 3000) {
 // Format numbers
 function formatPrice(val, currency = 'USD') {
   if (val === null || val === undefined) return '-';
-  const prefix = currency === 'USD' ? '$' : '';
+  let prefix = '$';
+  if (currency === 'THB') prefix = '฿';
+  else if (currency === 'HKD') prefix = 'HK$';
+  else if (currency !== 'USD') prefix = currency + ' ';
+
   if (val >= 1000) {
     return prefix + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -109,6 +113,11 @@ function getBadgeHtml(type) {
 }
 
 function getStockAnalysisUrl(symbol, type) {
+  const sym = symbol.trim();
+  if (sym.includes(':')) {
+    const parts = sym.split(':');
+    return `https://stockanalysis.com/stocks/${parts[0].toLowerCase()}/${parts[1].toLowerCase()}/`;
+  }
   const cleanSym = symbol.toLowerCase().replace('-usd', '').replace('^', '').trim();
   if (type === 'ETF') {
     return `https://stockanalysis.com/etf/${cleanSym}/`;

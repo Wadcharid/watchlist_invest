@@ -23,28 +23,49 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> float | None:
     last_rsi = float(rsi.iloc[-1])
     return round(last_rsi, 2) if not pd.isna(last_rsi) else None
 
+def resolve_ticker(raw_symbol: str) -> tuple[str, str, str | None]:
+    """
+    Resolve raw symbol into: (display_symbol, yf_symbol, stockanalysis_url)
+    Supports international prefixes like BKK:CPALL, HKG:0700
+    """
+    sym = raw_symbol.strip()
+    if ":" in sym:
+        prefix, code = sym.split(":", 1)
+        prefix = prefix.upper()
+        if prefix == "BKK":
+            yf_sym = f"{code}.BK"
+            sa_url = f"https://stockanalysis.com/stocks/bkk/{code.lower()}/"
+            return sym.upper(), yf_sym, sa_url
+        elif prefix == "HKG":
+            yf_sym = f"{code}.HK"
+            sa_url = f"https://stockanalysis.com/stocks/hkg/{code.lower()}/"
+            return sym.upper(), yf_sym, sa_url
+        else:
+            return sym.upper(), code, f"https://stockanalysis.com/stocks/{prefix.lower()}/{code.lower()}/"
+    elif sym.endswith(".BK"):
+        code = sym[:-3]
+        return f"BKK:{code.upper()}", sym, f"https://stockanalysis.com/stocks/bkk/{code.lower()}/"
+    elif sym.endswith(".HK"):
+        code = sym[:-3]
+        return f"HKG:{code.upper()}", sym, f"https://stockanalysis.com/stocks/hkg/{code.lower()}/"
+    else:
+        return sym.upper(), sym, None
+
 def get_stockanalysis_url(symbol: str, quote_type: str) -> str:
-    """Build URL linking to stockanalysis.com."""
+    """Build default URL linking to stockanalysis.com for US assets / ETFs / Crypto."""
     clean_sym = symbol.lower().replace("-usd", "").replace("^", "").strip()
     if quote_type == "ETF":
         return f"https://stockanalysis.com/etf/{clean_sym}/"
     elif quote_type == "CRYPTOCURRENCY":
-        # stockanalysis covers crypto ETFs (like BTC) or search
         return f"https://stockanalysis.com/?s={clean_sym.upper()}"
     else:
-        # Default equity / stocks
         return f"https://stockanalysis.com/stocks/{clean_sym}/"
 
 def parse_dividend_yield(info: dict) -> float | None:
     """Parse dividend yield into a standardized percentage value."""
-    # dividendYield in yfinance is often already percentage (e.g., 0.33 -> 0.33%)
-    # or trailingAnnualDividendYield might be decimal (0.0033)
     div_yield = info.get("dividendYield")
     if div_yield is not None and not pd.isna(div_yield):
         val = float(div_yield)
-        # If dividendYield is less than 0.1 but greater than 0, check if it's decimal or small %
-        # In yfinance, dividendYield for AAPL is ~0.33-0.5, for high yields like MO it is ~7.5
-        # If it happens to be decimal (<0.1) and trailingAnnualDividendYield matches val, convert
         if val > 0:
             return round(val, 2)
             
@@ -58,20 +79,21 @@ def parse_dividend_yield(info: dict) -> float | None:
             
     return None
 
-def fetch_symbol_data(symbol: str) -> dict:
+def fetch_symbol_data(raw_symbol: str) -> dict:
     """Fetch all metrics and indicators for a single symbol."""
-    print(f"Fetching data for: {symbol}...")
-    ticker = yf.Ticker(symbol)
+    display_symbol, yf_symbol, direct_sa_url = resolve_ticker(raw_symbol)
+    print(f"Fetching data for: {display_symbol} (yfinance: {yf_symbol})...")
+    ticker = yf.Ticker(yf_symbol)
     
     # Retrieve info
     try:
         info = ticker.info or {}
     except Exception as e:
-        print(f"Warning: could not fetch info for {symbol}: {e}")
+        print(f"Warning: could not fetch info for {yf_symbol}: {e}")
         info = {}
 
     quote_type = info.get("quoteType", "EQUITY")
-    name = info.get("shortName") or info.get("longName") or symbol
+    name = info.get("shortName") or info.get("longName") or display_symbol
     currency = info.get("currency", "USD")
     
     # Price and Change
@@ -103,30 +125,30 @@ def fetch_symbol_data(symbol: str) -> dict:
                 curr_c = float(df_daily["Close"].iloc[-1])
                 change_pct = round(((curr_c - prev_c) / prev_c) * 100, 2)
     except Exception as e:
-        print(f"Warning: error calculating daily RSI for {symbol}: {e}")
+        print(f"Warning: error calculating daily RSI for {yf_symbol}: {e}")
 
     try:
         df_weekly = ticker.history(period="2y", interval="1wk")
         if not df_weekly.empty and "Close" in df_weekly:
             rsi_weekly = calculate_rsi(df_weekly["Close"])
     except Exception as e:
-        print(f"Warning: error calculating weekly RSI for {symbol}: {e}")
+        print(f"Warning: error calculating weekly RSI for {yf_symbol}: {e}")
 
     try:
         df_monthly = ticker.history(period="5y", interval="1mo")
         if not df_monthly.empty and "Close" in df_monthly:
             rsi_monthly = calculate_rsi(df_monthly["Close"])
     except Exception as e:
-        print(f"Warning: error calculating monthly RSI for {symbol}: {e}")
+        print(f"Warning: error calculating monthly RSI for {yf_symbol}: {e}")
 
     # Standardize values
     price_val = round(float(price), 2) if price is not None and not pd.isna(price) else None
     change_val = round(float(change_pct), 2) if change_pct is not None and not pd.isna(change_pct) else 0.0
 
-    stockanalysis_url = get_stockanalysis_url(symbol, quote_type)
+    stockanalysis_url = direct_sa_url if direct_sa_url else get_stockanalysis_url(display_symbol, quote_type)
 
     return {
-        "symbol": symbol.upper(),
+        "symbol": display_symbol,
         "name": name,
         "type": quote_type,
         "currency": currency,
@@ -162,9 +184,10 @@ def main():
             results.append(data)
         except Exception as e:
             print(f"Error fetching {symbol}: {e}")
+            display_sym, _, sa_url = resolve_ticker(symbol)
             results.append({
-                "symbol": symbol.upper(),
-                "name": symbol.upper(),
+                "symbol": display_sym,
+                "name": display_sym,
                 "type": "UNKNOWN",
                 "currency": "USD",
                 "price": None,
@@ -174,7 +197,7 @@ def main():
                 "rsi_daily": None,
                 "rsi_weekly": None,
                 "rsi_monthly": None,
-                "stockanalysis_url": f"https://stockanalysis.com/?s={symbol.upper()}",
+                "stockanalysis_url": sa_url or f"https://stockanalysis.com/?s={display_sym}",
                 "last_updated": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
             })
 
