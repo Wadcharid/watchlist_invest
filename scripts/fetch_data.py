@@ -1,9 +1,23 @@
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 import yfinance as yf
+
+def get_thai_datetime_str(dt: datetime | None = None) -> str:
+    """Format datetime to Thai date and time string (e.g. 5 พ.ย. 2569 เวลา 14:25:00 น.)"""
+    tz_thai = timezone(timedelta(hours=7))
+    if dt is None:
+        dt = datetime.now(tz_thai)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc).astimezone(tz_thai)
+    else:
+        dt = dt.astimezone(tz_thai)
+
+    thai_months = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+    thai_year = dt.year + 543
+    return f"{dt.day} {thai_months[dt.month]} {thai_year} เวลา {dt.strftime('%H:%M:%S')} น."
 
 def calculate_rsi(series: pd.Series, period: int = 14) -> float | None:
     """Calculate Wilder's 14-period RSI from price series."""
@@ -103,7 +117,6 @@ def calculate_best_dividend_yield(ticker, info: dict, price: float | None, quote
 
     # 2. Thai stocks (BKK:BDMS, BKK:CPALL, etc.)
     if display_symbol.startswith("BKK:"):
-        # BDMS paid 0.65 + 0.35 = 1.00 THB in the trailing 12 months -> 1.00 / 19.80 = 5.05%
         if display_symbol == "BKK:BDMS" and ttm_yield is not None:
             return ttm_yield
         if ttm_yield is not None and ttm_yield > 0:
@@ -216,7 +229,7 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
         "rsi_weekly": rsi_weekly,
         "rsi_monthly": rsi_monthly,
         "stockanalysis_url": stockanalysis_url,
-        "last_updated": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        "last_updated": get_thai_datetime_str()
     }
 
 def main():
@@ -254,11 +267,13 @@ def main():
                 "rsi_weekly": None,
                 "rsi_monthly": None,
                 "stockanalysis_url": sa_url or f"https://stockanalysis.com/?s={display_sym}",
-                "last_updated": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+                "last_updated": get_thai_datetime_str()
             })
 
+    thai_now = get_thai_datetime_str()
     output_data = {
-        "last_updated": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "last_updated": thai_now,
+        "last_updated_iso": datetime.now(timezone(timedelta(hours=7))).isoformat(),
         "total_assets": len(results),
         "assets": results
     }
@@ -267,7 +282,7 @@ def main():
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
         
-    print(f"Successfully wrote data for {len(results)} assets to {output_path}")
+    print(f"Successfully wrote data for {len(results)} assets to {output_path} (Last updated: {thai_now})")
 
 if __name__ == "__main__":
     main()

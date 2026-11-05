@@ -133,6 +133,40 @@ function getStockAnalysisUrl(symbol, type) {
   return `https://stockanalysis.com/stocks/${cleanSym}/`;
 }
 
+function formatThaiDateTime(dateString) {
+  if (!dateString) return '-';
+  if (dateString.includes('เวลา') || dateString.includes('น.')) {
+    return dateString;
+  }
+  try {
+    let iso = dateString;
+    if (dateString.endsWith(' UTC')) {
+      iso = dateString.replace(' UTC', 'Z').replace(' ', 'T');
+    }
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return dateString;
+
+    const datePart = new Intl.DateTimeFormat('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    }).format(d);
+
+    const timePart = new Intl.DateTimeFormat('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).format(d);
+
+    return `${datePart} เวลา ${timePart} น.`;
+  } catch (e) {
+    return dateString;
+  }
+}
+
 // Fetch Master Data
 async function loadData() {
   try {
@@ -142,7 +176,7 @@ async function loadData() {
     allStocksData = json.assets || [];
     
     if (json.last_updated) {
-      lastUpdatedText.textContent = `อัปเดตล่าสุด: ${json.last_updated}`;
+      lastUpdatedText.textContent = `อัปเดตล่าสุด: ${formatThaiDateTime(json.last_updated)}`;
     }
 
     // Initialize Watchlist
