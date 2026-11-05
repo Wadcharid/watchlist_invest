@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="th" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Investment Watchlist | ตรวจสอบข้อมูลหุ้น & การลงทุน</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo-area">
+          <div class="logo-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m3 3 7 7-4 4 7 7"/>
+              <path d="m14 10 7-7"/>
+              <path d="M14 3h7v7"/>
+            </svg>
+          </div>
+          <div>
+            <h1>Investment Watchlist</h1>
+            <p class="subtitle">ระบบวิเคราะห์ข้อมูลหุ้น & สินทรัพย์ อ้างอิงข้อมูลเชื่อมโยง <a href="https://stockanalysis.com/" target="_blank" rel="noopener noreferrer">StockAnalysis.com</a></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="market-status">
+          <span class="status-dot"></span>
+          <span id="lastUpdatedText">กำลังโหลดข้อมูล...</span>
+        </div>
+        <button id="btnOpenSync" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          จัดการ Watchlist & GitHub Sync
+        </button>
+      </div>
+    </header>
+
+    <!-- Toolbar: Search, Filters, Add Asset -->
+    <section class="toolbar">
+      <div class="toolbar-left">
+        <!-- Search Input -->
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
+          <input type="text" id="searchInput" placeholder="ค้นหา Symbol หรือชื่อสินทรัพย์ (เช่น AAPL, NVDA, SPY)...">
+        </div>
+
+        <!-- Category Filters -->
+        <div class="filter-tabs">
+          <button class="filter-btn active" data-category="ALL">ทั้งหมด (<span id="countAll">0</span>)</button>
+          <button class="filter-btn" data-category="EQUITY">หุ้น (Stocks)</button>
+          <button class="filter-btn" data-category="ETF">กองทุน (ETFs)</button>
+          <button class="filter-btn" data-category="CRYPTOCURRENCY">คริปโต (Crypto)</button>
+        </div>
+
+        <!-- RSI Condition Filter -->
+        <div class="select-wrapper">
+          <select id="rsiFilter">
+            <option value="ALL">สถานะ RSI ทั้งหมด</option>
+            <option value="OVERSOLD">Daily RSI &lt; 30 (Oversold / โซนขายมากเกินไป)</option>
+            <option value="OVERBOUGHT">Daily RSI &gt; 70 (Overbought / โซนซื้อมากเกินไป)</option>
+            <option value="NEUTRAL">Daily RSI 30 - 70 (โซนปกติ)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Add Asset Form -->
+      <div class="toolbar-right">
+        <form id="addAssetForm" class="add-form">
+          <div class="input-with-button">
+            <input type="text" id="newSymbolInput" placeholder="เพิ่ม Ticker (เช่น TSLA, QQQ, BTC-USD)" required autocomplete="off" style="text-transform: uppercase;">
+            <button type="submit" class="btn btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              เพิ่มสินทรัพย์
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Stat Cards Overview -->
+    <section class="stat-cards">
+      <div class="stat-card">
+        <span class="stat-label">สินทรัพย์ที่ติดตาม</span>
+        <span class="stat-value" id="statTotalCount">0</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">สินทรัพย์ที่ปรับตัวขึ้น (Gainers)</span>
+        <span class="stat-value text-green" id="statGainersCount">0</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">สินทรัพย์ที่ปรับตัวลง (Losers)</span>
+        <span class="stat-value text-red" id="statLosersCount">0</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">โซน Oversold (RSI &lt; 30)</span>
+        <span class="stat-value text-green" id="statOversoldCount">0</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">โซน Overbought (RSI &gt; 70)</span>
+        <span class="stat-value text-red" id="statOverboughtCount">0</span>
+      </div>
+    </section>
+
+    <!-- Main Table Container -->
+    <main class="table-card">
+      <div class="table-responsive">
+        <table id="watchlistTable">
+          <thead>
+            <tr>
+              <th data-sort="symbol" class="sortable">
+                <span>สินทรัพย์ (Asset)</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th data-sort="price" class="sortable text-right">
+                <span>ราคาล่าสุด</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th data-sort="change_pct" class="sortable text-right">
+                <span>% Change</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th data-sort="pe" class="sortable text-right">
+                <span>P/E Ratio</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th data-sort="rsi_daily" class="sortable text-center">
+                <span>Daily RSI (14)</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th data-sort="rsi_weekly" class="sortable text-center">
+                <span>Weekly RSI (14)</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th data-sort="rsi_monthly" class="sortable text-center">
+                <span>Monthly RSI (14)</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th data-sort="dividend_yield" class="sortable text-right">
+                <span>% Div Yield</span>
+                <span class="sort-icon">↕</span>
+              </th>
+              <th class="text-center" style="width: 140px;">
+                <span>StockAnalysis</span>
+              </th>
+              <th class="text-center" style="width: 60px;">
+                <span>จัดการ</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <!-- Dynamic rows rendered by JavaScript -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="empty-state" style="display: none;">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <h3>ไม่พบข้อมูลสินทรัพย์</h3>
+        <p>ลองปรับคำค้นหา หรือเพิ่ม Ticker ที่ต้องการเข้าไปใน Watchlist</p>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <div>
+        <span>ระบบ Watchlist การลงทุนส่วนตัว | ข้อมูลอ้างอิงจาก </span>
+        <a href="https://stockanalysis.com/" target="_blank" rel="noopener noreferrer">StockAnalysis.com</a>
+      </div>
+      <div>
+        <span>Repository: </span>
+        <a href="https://github.com/Wadcharid/watchlist_invest" target="_blank" rel="noopener noreferrer">Wadcharid/watchlist_invest</a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Settings / Sync Modal -->
+  <div id="syncModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>จัดการ Watchlist & ซิงก์กับ GitHub</h3>
+        <button id="btnCloseSync" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          คุณสามารถเพิ่ม/ลบ Ticker ได้บนหน้าเว็บนี้ทันที ข้อมูลจะถูกบันทึกไว้ในเบราว์เซอร์ของคุณ และคุณสามารถซิงก์กลับไปยัง GitHub Repository เพื่อให้ GitHub Actions คำนวณข้อมูลอัตโนมัติได้
+        </p>
+
+        <!-- Current Watchlist JSON -->
+        <div class="form-group">
+          <label>รายชื่อ Tickers ปัจจุบัน (watchlist.json):</label>
+          <textarea id="watchlistTextarea" rows="6" spellcheck="false"></textarea>
+          <div class="button-row" style="margin-top: 8px;">
+            <button id="btnApplyJson" class="btn btn-sm btn-secondary">บันทึกรายการในเบราว์เซอร์</button>
+            <button id="btnCopyJson" class="btn btn-sm btn-secondary">📋 คัดลอก JSON</button>
+            <button id="btnDownloadJson" class="btn btn-sm btn-secondary">💾 ดาวน์โหลด watchlist.json</button>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <!-- GitHub Direct Sync (Optional) -->
+        <div class="form-group">
+          <h4>ซิงก์อัตโนมัติไปยัง GitHub (ตัวเลือกเสริม)</h4>
+          <p class="help-text">
+            ใส่ GitHub Personal Access Token (PAT) ที่มีสิทธิ์ <code>repo</code> เพื่อให้ระบบกดอัปเดตไฟล์ <code>data/watchlist.json</code> บน GitHub และสั่งรัน GitHub Actions ทันทีโดยไม่ต้องเปิด GitHub
+          </p>
+          <input type="password" id="githubTokenInput" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx (บันทึกเฉพาะในเบราว์เซอร์ของคุณ)">
+          <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
+            <button id="btnSyncToGitHub" class="btn btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+              </svg>
+              บันทึกไปที่ GitHub & สั่งรันคำนวณข้อมูลทันที
+            </button>
+            <span id="syncStatus" class="sync-status"></span>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <!-- Manual Actions Link -->
+        <div class="manual-trigger-help">
+          <span>หรือเปิดรัน Workflow ด้วยตัวเองที่ GitHub: </span>
+          <a href="https://github.com/Wadcharid/watchlist_invest/actions" target="_blank" rel="noopener noreferrer" class="link-btn">
+            เปิดหน้า GitHub Actions &rarr;
+          </a>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnResetWatchlist" class="btn btn-danger-outline">รีเซ็ตเป็นค่าเริ่มต้น</button>
+        <button id="btnDoneSync" class="btn btn-secondary">ปิดหน้าต่าง</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
