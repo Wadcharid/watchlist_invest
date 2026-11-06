@@ -20,6 +20,25 @@ const BASELINE_PE_MAP = {
   'ACWI': 19.36
 };
 
+const BASELINE_DIV_YIELD_MAP = {
+  'NVDA': 0.55,
+  'MSFT': 0.73,
+  'GOOGL': 0.31,
+  'AMZN': null,
+  'SCHD': 2.98,
+  'BTC-USD': null,
+  'TSM': 1.15,
+  'SPYI': 12.36,
+  'VYMI': 3.67,
+  'BKK:CPALL': 3.63,
+  'BKK:BDMS': 5.08,
+  'BKK:GULF': 1.72,
+  'IAUI': 14.18,
+  'HKG:0700': 1.26,
+  'ACWI': 1.47,
+  'BKK:PTTEP': 6.10
+};
+
 // Helper to format Thai date and time
 function getThaiDateTimeStr() {
   const now = new Date();
@@ -203,14 +222,36 @@ async function fetchSingleAsset(symbol, shouldFetchSA = true) {
     const monthlyCloses = Array.from(monthlyMap.values());
     const rsiMonthly = calculateWilderRSI(monthlyCloses, 14);
 
-    // TTM Dividend Yield calculation from cash distributions in past 12 months
-    let dividendYield = null;
-    const events = chartRes.events || {};
-    const dividends = events.dividends || {};
-    const divValues = Object.values(dividends);
-    if (divValues.length > 0 && price && price > 0) {
-      const totalCashDiv12m = divValues.reduce((sum, d) => sum + (d.amount || 0), 0);
-      dividendYield = Math.round((totalCashDiv12m / price) * 10000) / 100;
+    // TTM Dividend Yield calculation:
+    // 1. Try extracting exact official yield from StockAnalysis HTML
+    let dividendYield = BASELINE_DIV_YIELD_MAP[displaySymbol] ?? null;
+    if (saHtml) {
+      const divMatch = saHtml.match(/<td[^>]*>(?:<!--\[-?\d+-->)?(?:<a[^>]*>)?Dividend(?:<\/a>)?(?:<!--\]-->)?<\/td>\s*<td[^>]*>(?:<!--\[-?\d+-->)?([^<]+)/i);
+      if (divMatch && divMatch[1]) {
+        const rawDiv = divMatch[1].trim();
+        if (rawDiv && rawDiv !== '-' && rawDiv.toLowerCase() !== 'n/a') {
+          const pctM = rawDiv.match(/\(([0-9\.]+)%\)/) || rawDiv.match(/([0-9\.]+)%/);
+          if (pctM && pctM[1]) {
+            const parsedYield = parseFloat(pctM[1]);
+            if (!isNaN(parsedYield) && parsedYield >= 0) {
+              dividendYield = parsedYield;
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Fallback: calculate TTM (past 365 days only) cash dividends from chart if not available
+    if (dividendYield === null && assetType !== 'CRYPTOCURRENCY') {
+      const events = chartRes.events || {};
+      const dividends = events.dividends || {};
+      const nowSec = Math.floor(Date.now() / 1000);
+      const oneYearAgoSec = nowSec - (365 * 86400);
+      const ttmDividends = Object.values(dividends).filter(d => (d.date || 0) >= oneYearAgoSec);
+      if (ttmDividends.length > 0 && price && price > 0) {
+        const totalCashDiv12m = ttmDividends.reduce((sum, d) => sum + (d.amount || 0), 0);
+        dividendYield = Math.round((totalCashDiv12m / price) * 10000) / 100;
+      }
     }
 
     // P/E Ratio: Live extraction from StockAnalysis HTML with fallback to BASELINE_PE_MAP

@@ -250,6 +250,14 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
                 m_chg = re.search(r'data-test="quote-change-percent"[^>]*>([+-]?[0-9\.,]+)%?', html_sa) or re.search(r'\(([+-]?[0-9\.,]+)%\)', html_sa)
                 if m_chg:
                     change_val = float(m_chg.group(1).replace(',', ''))
+                # Scrape official Dividend Yield
+                m_div = re.search(r'<td[^>]*>(?:<!--\[-?\d+-->)?(?:<a[^>]*>)?Dividend(?:</a>)?(?:<!--\]-->)?</td>\s*<td[^>]*>(?:<!--\[-?\d+-->)?([^<]+)', html_sa, re.I)
+                if m_div:
+                    raw_div = m_div.group(1).strip()
+                    if raw_div and raw_div != '-' and raw_div.lower() != 'n/a':
+                        pct_m = re.search(r'\(([0-9\.]+)%\)', raw_div) or re.search(r'([0-9\.]+)%', raw_div)
+                        if pct_m:
+                            div_yield = float(pct_m.group(1))
                 if price_val is None:
                     m_p = re.search(r'data-test="quote-price"[^>]*>([0-9\.,]+)<', html_sa) or re.search(r'class="text-4xl[^"]*"[^>]*>([0-9\.,]+)<', html_sa) or re.search(r'class="text-3xl[^"]*"[^>]*>([0-9\.,]+)<', html_sa)
                     if m_p:
