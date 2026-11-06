@@ -1,0 +1,9 @@
+.git/**
+.github/**
+functions/**
+scripts/**
+src/**
+rea-main/**
+rea-main.zip
+wrangler.json
+.assetsignore
