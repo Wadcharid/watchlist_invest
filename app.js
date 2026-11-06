@@ -25,6 +25,8 @@ const rsiFilter = document.getElementById('rsiFilter');
 const addAssetForm = document.getElementById('addAssetForm');
 const newSymbolInput = document.getElementById('newSymbolInput');
 const lastUpdatedText = document.getElementById('lastUpdatedText');
+const btnRefreshMarket = document.getElementById('btnRefreshMarket');
+const btnRefreshText = document.getElementById('btnRefreshText');
 
 // Banner Elements
 const pendingSyncBanner = document.getElementById('pendingSyncBanner');
@@ -167,13 +169,18 @@ function formatThaiDateTime(dateString) {
   }
 }
 
+let currentIsoTimestamp = '';
+
 // Fetch Master Data
 async function loadData() {
   try {
-    const res = await fetch('data/stocks.json?t=' + Date.now());
+    const res = await fetch('data/stocks.json?t=' + Date.now(), {
+      cache: 'no-store'
+    });
     if (!res.ok) throw new Error('Cannot load data/stocks.json');
     const json = await res.json();
     allStocksData = json.assets || [];
+    currentIsoTimestamp = json.last_updated_iso || '';
     
     if (json.last_updated) {
       lastUpdatedText.textContent = `อัปเดตล่าสุด: ${formatThaiDateTime(json.last_updated)}`;
@@ -674,6 +681,93 @@ btnSyncToGitHub.addEventListener('click', async () => {
     alert(`ข้อผิดพลาดในการซิงก์: ${err.message}\n\nตรวจสอบ Token หรือใช้ปุ่ม 'คัดลอก JSON' ไปวางใน GitHub แทนได้ครับ`);
   }
 });
+
+// Force Refresh Market Data
+if (btnRefreshMarket) {
+  btnRefreshMarket.addEventListener('click', async () => {
+    const token = localStorage.getItem(STORAGE_KEYS.GITHUB_PAT);
+    if (!token) {
+      if (typeof openSyncModal === 'function') {
+        openSyncModal();
+      } else {
+        watchlistTextarea.value = JSON.stringify(userWatchlist, null, 2);
+        githubTokenInput.value = '';
+        syncModal.style.display = 'flex';
+      }
+      showToast('⚠️ กรุณากรอก GitHub Token ในช่องด้านล่าง แล้วกดซิงก์ (เพื่ออนุญาตให้สั่งอัปเดตข้อมูลได้ครับ)', 6000);
+      return;
+    }
+
+    const icon = btnRefreshMarket.querySelector('svg');
+    if (icon) icon.classList.add('spin-anim');
+    if (btnRefreshText) btnRefreshText.textContent = 'กำลังส่งคำสั่ง...';
+    btnRefreshMarket.disabled = true;
+
+    try {
+      const dispatchRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/update_data.yml/dispatches`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ref: 'main' })
+      });
+
+      if (!dispatchRes.ok && dispatchRes.status !== 204) {
+        const err = await dispatchRes.json().catch(() => ({}));
+        throw new Error(err.message || `HTTP ${dispatchRes.status}`);
+      }
+
+      if (btnRefreshText) btnRefreshText.textContent = 'กำลังคำนวณราคา... (~30 วิ)';
+      showToast('🚀 ส่งคำสั่งสำเร็จ! ระบบกำลังดึงราคาและคำนวณ RSI ใน GitHub Actions (ใช้เวลา ~30 วินาที)', 7000);
+
+      const startIso = currentIsoTimestamp;
+      let attempts = 0;
+      const pollTimer = setInterval(async () => {
+        attempts++;
+        try {
+          const pollRes = await fetch('data/stocks.json?t=' + Date.now(), { cache: 'no-store' });
+          if (pollRes.ok) {
+            const pollData = await pollRes.json();
+            if (pollData.last_updated_iso && pollData.last_updated_iso !== startIso) {
+              clearInterval(pollTimer);
+              allStocksData = pollData.assets || [];
+              currentIsoTimestamp = pollData.last_updated_iso;
+              if (pollData.last_updated) {
+                lastUpdatedText.textContent = `อัปเดตล่าสุด: ${formatThaiDateTime(pollData.last_updated)}`;
+              }
+              render();
+              if (icon) icon.classList.remove('spin-anim');
+              if (btnRefreshText) btnRefreshText.textContent = 'อัปเดตราคาล่าสุด';
+              btnRefreshMarket.disabled = false;
+              showToast('🎉 ข้อมูลราคาและ RSI อัปเดตล่าสุดเรียบร้อยแล้ว!', 5000);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('Poll error:', e);
+        }
+
+        if (attempts >= 18) { // timeout after 90s
+          clearInterval(pollTimer);
+          if (icon) icon.classList.remove('spin-anim');
+          if (btnRefreshText) btnRefreshText.textContent = 'อัปเดตราคาล่าสุด';
+          btnRefreshMarket.disabled = false;
+          loadData();
+          showToast('ℹ️ กระบวนการทำงานบน GitHub กำลังเสร็จสิ้น หากยังไม่เปลี่ยนให้ลองกดรีเฟรชอีกครั้งในอีกสักครู่ครับ', 6000);
+        }
+      }, 5000);
+
+    } catch (err) {
+      console.error('Trigger update error:', err);
+      alert(`สั่งอัปเดตไม่สำเร็จ: ${err.message}`);
+      if (icon) icon.classList.remove('spin-anim');
+      if (btnRefreshText) btnRefreshText.textContent = 'อัปเดตราคาล่าสุด';
+      btnRefreshMarket.disabled = false;
+    }
+  });
+}
 
 // Load on start
 loadData();
