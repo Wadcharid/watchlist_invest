@@ -104,14 +104,44 @@ const toast = document.getElementById('toast');
 /* ==========================================================================
    Initialization
    ========================================================================== */
-function initApp() {
+async function initApp() {
   initTheme();
   loadWatchlistsState();
   initViewMode();
   setupEventListeners();
 
-  // Initial Fetch Data
+  // Load baseline stocks.json immediately so PE and initial data appear with zero lag
+  await loadBaselineData();
+
+  // Fetch live market data
   fetchActiveListMarketData();
+}
+
+async function loadBaselineData() {
+  try {
+    const res = await fetch(`data/stocks.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.assets)) {
+        data.assets.forEach(asset => {
+          const existing = marketDataMap.get(asset.symbol);
+          if ((asset.pe === null || asset.pe === undefined) && existing && existing.pe !== null) {
+            asset.pe = existing.pe;
+          }
+          if ((asset.dividend_yield === null || asset.dividend_yield === undefined) && existing && existing.dividend_yield !== null) {
+            asset.dividend_yield = existing.dividend_yield;
+          }
+          marketDataMap.set(asset.symbol, asset);
+        });
+        if (data.last_updated) {
+          lastUpdatedBadge.textContent = data.last_updated;
+        }
+        renderTable();
+      }
+    }
+  } catch (err) {
+    console.warn('Could not load baseline stocks.json:', err);
+  }
 }
 
 function initTheme() {

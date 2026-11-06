@@ -1,7 +1,24 @@
 /**
  * Watchvest Quote API Handler
- * Fetches real-time price, % change, RSI (Daily, Weekly, Monthly), and TTM Dividend Yield.
+ * Fetches real-time price, % change, RSI (Daily, Weekly, Monthly), P/E ratio, and Dividend Yield.
  */
+
+const BASELINE_PE_MAP = {
+  'NVDA': 22.96,
+  'MSFT': 27.97,
+  'GOOGL': 14.76,
+  'AMZN': 34.20,
+  'SCHD': 15.80,
+  'TSM': 25.65,
+  'SPYI': 22.85,
+  'VYMI': 13.54,
+  'BKK:CPALL': 13.52,
+  'BKK:BDMS': 20.54,
+  'BKK:GULF': 12.03,
+  'BKK:PTTEP': 7.80,
+  'HKG:0700': 14.57,
+  'ACWI': 20.95
+};
 
 // Helper to format Thai date and time
 function getThaiDateTimeStr() {
@@ -108,10 +125,16 @@ async function fetchSingleAsset(symbol) {
     // 3. Fetch Monthly Chart (5 Years)
     const monthlyUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?interval=1mo&range=5y`;
 
-    const [dailyRes, weeklyRes, monthlyRes] = await Promise.all([
+    // 4. Fetch StockAnalysis page for real-time P/E ratio if available
+    const saFetchPromise = (assetType !== 'CRYPTOCURRENCY' && saUrl)
+      ? fetch(saUrl, { headers }).then(r => r.ok ? r.text() : null).catch(() => null)
+      : Promise.resolve(null);
+
+    const [dailyRes, weeklyRes, monthlyRes, saHtml] = await Promise.all([
       fetch(dailyUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch(weeklyUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(monthlyUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null)
+      fetch(monthlyUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+      saFetchPromise
     ]);
 
     if (!dailyRes || !dailyRes.chart || !dailyRes.chart.result || dailyRes.chart.result.length === 0) {
@@ -123,10 +146,31 @@ async function fetchSingleAsset(symbol) {
     const quoteData = (chartRes.indicators && chartRes.indicators.quote && chartRes.indicators.quote[0]) || {};
 
     const price = meta.regularMarketPrice ?? null;
-    const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
+
+    // Accurate 24h Change Percentage (using official market change percent or last 2 daily candles)
     let changePct = null;
-    if (price !== null && prevClose !== null && prevClose !== 0) {
-      changePct = Math.round(((price - prevClose) / prevClose) * 10000) / 100;
+    if (typeof meta.regularMarketChangePercent === 'number' && !isNaN(meta.regularMarketChangePercent)) {
+      changePct = Math.round(meta.regularMarketChangePercent * 100) / 100;
+    } else {
+      const validCloses = (quoteData.close || []).filter(c => typeof c === 'number' && !isNaN(c));
+      if (validCloses.length >= 2 && price !== null) {
+        const prevDayClose = validCloses[validCloses.length - 2];
+        if (prevDayClose && prevDayClose !== 0) {
+          changePct = Math.round(((price - prevDayClose) / prevDayClose) * 10000) / 100;
+        }
+      }
+    }
+
+    // P/E Ratio: Extract from StockAnalysis HTML or fallback to BASELINE_PE_MAP
+    let pe = BASELINE_PE_MAP[displaySymbol] ?? null;
+    if (saHtml) {
+      const peMatch = saHtml.match(/PE Ratio<\/td>\s*<td[^>]*>([0-9\.]+)/i);
+      if (peMatch && peMatch[1]) {
+        const parsedPe = parseFloat(peMatch[1]);
+        if (!isNaN(parsedPe) && parsedPe > 0) {
+          pe = parsedPe;
+        }
+      }
     }
 
     // RSIs
@@ -162,7 +206,7 @@ async function fetchSingleAsset(symbol) {
       currency: meta.currency || 'USD',
       price: price,
       change_pct: changePct,
-      pe: meta.trailingPE ?? null,
+      pe: pe,
       dividend_yield: dividendYield,
       rsi_daily: rsiDaily,
       rsi_weekly: rsiWeekly,
@@ -182,7 +226,7 @@ async function fetchSingleAsset(symbol) {
       currency: 'USD',
       price: null,
       change_pct: null,
-      pe: null,
+      pe: BASELINE_PE_MAP[displaySymbol] ?? null,
       dividend_yield: null,
       rsi_daily: null,
       rsi_weekly: null,
