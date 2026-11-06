@@ -287,6 +287,15 @@ function duplicateCurrentWatchlist() {
 /* ==========================================================================
    Data Fetching Engine (Cloudflare Edge Function + Fallback)
    ========================================================================== */
+function getApiEndpoint(path) {
+  const isCloudflareOrLocal = window.location.hostname.includes('pages.dev') ||
+    window.location.hostname.includes('workers.dev') ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1';
+  const base = isCloudflareOrLocal ? '' : 'https://watchvest.pages.dev';
+  return `${base}${path}`;
+}
+
 async function fetchActiveListMarketData(forceRefresh = false) {
   const list = getActiveWatchlist();
   if (!list.symbols || list.symbols.length === 0) {
@@ -301,7 +310,7 @@ async function fetchActiveListMarketData(forceRefresh = false) {
 
   try {
     // 1. Try Cloudflare Pages Function endpoint
-    const edgeUrl = `/api/quote?symbols=${encodeURIComponent(symbolsParam)}${cacheBuster}`;
+    const edgeUrl = getApiEndpoint(`/api/quote?symbols=${encodeURIComponent(symbolsParam)}${cacheBuster}`);
     const res = await fetch(edgeUrl, { cache: forceRefresh ? 'no-store' : 'default' });
 
     if (res.ok) {
@@ -780,7 +789,8 @@ async function handleSearchInput(e) {
 
   searchDebounceTimer = setTimeout(async () => {
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const searchUrl = getApiEndpoint(`/api/search?q=${encodeURIComponent(query)}`);
+      const res = await fetch(searchUrl);
       if (res.ok) {
         const data = await res.json();
         renderSearchDropdown(data.results || [], query);

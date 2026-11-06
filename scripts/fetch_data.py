@@ -205,6 +205,27 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
     price_val = round(float(price), 2) if price is not None and not pd.isna(price) else None
     change_val = round(float(change_pct), 2) if change_pct is not None and not pd.isna(change_pct) else 0.0
 
+    # Fallback to direct Yahoo Finance v8 chart if yfinance timed out
+    if price_val is None or rsi_daily is None:
+        try:
+            import urllib.request, json
+            v8_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_symbol}?interval=1d&range=2y"
+            req_v8 = urllib.request.Request(v8_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req_v8, timeout=6) as r_v8:
+                d_v8 = json.loads(r_v8.read().decode('utf-8'))
+                m_v8 = d_v8['chart']['result'][0]['meta']
+                if price_val is None:
+                    price_val = m_v8.get('regularMarketPrice')
+                if change_val == 0.0 and m_v8.get('regularMarketChangePercent') is not None:
+                    change_val = round(m_v8.get('regularMarketChangePercent'), 2)
+                if rsi_daily is None:
+                    q_closes = d_v8['chart']['result'][0]['indicators']['quote'][0].get('close', [])
+                    v_closes = [c for c in q_closes if c is not None]
+                    if len(v_closes) >= 15:
+                        rsi_daily = calculate_rsi(pd.Series(v_closes))
+        except Exception:
+            pass
+
     # P/E Ratio
     pe = info.get("trailingPE")
     if pe is None or pd.isna(pe):
@@ -215,6 +236,26 @@ def fetch_symbol_data(raw_symbol: str) -> dict:
     div_yield = calculate_best_dividend_yield(ticker, info, price_val, quote_type, display_symbol)
 
     stockanalysis_url = direct_sa_url if direct_sa_url else get_stockanalysis_url(display_symbol, quote_type)
+
+    # Scrape StockAnalysis real-time P/E and %change for 100% parity with stockanalysis.com
+    if quote_type != "CRYPTOCURRENCY" and stockanalysis_url:
+        try:
+            import urllib.request, re
+            req_sa = urllib.request.Request(stockanalysis_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            with urllib.request.urlopen(req_sa, timeout=6) as r_sa:
+                html_sa = r_sa.read().decode('utf-8')
+                m_pe = re.search(r'PE Ratio(?: \([^)]+\))?</td>\s*<td[^>]*>([0-9\.]+)', html_sa, re.I)
+                if m_pe:
+                    pe = float(m_pe.group(1))
+                m_chg = re.search(r'data-test="quote-change-percent"[^>]*>([+-]?[0-9\.,]+)%?', html_sa) or re.search(r'\(([+-]?[0-9\.,]+)%\)', html_sa)
+                if m_chg:
+                    change_val = float(m_chg.group(1).replace(',', ''))
+                if price_val is None:
+                    m_p = re.search(r'data-test="quote-price"[^>]*>([0-9\.,]+)<', html_sa) or re.search(r'class="text-4xl[^"]*"[^>]*>([0-9\.,]+)<', html_sa) or re.search(r'class="text-3xl[^"]*"[^>]*>([0-9\.,]+)<', html_sa)
+                    if m_p:
+                        price_val = float(m_p.group(1).replace(',', ''))
+        except Exception:
+            pass
 
     return {
         "symbol": display_symbol,

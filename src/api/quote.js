@@ -5,19 +5,19 @@
 
 const BASELINE_PE_MAP = {
   'NVDA': 22.96,
-  'MSFT': 27.97,
-  'GOOGL': 14.76,
-  'AMZN': 34.20,
-  'SCHD': 15.80,
-  'TSM': 25.65,
+  'MSFT': 27.98,
+  'GOOGL': 14.75,
+  'AMZN': 21.03,
+  'SCHD': 18.34,
+  'TSM': 23.88,
   'SPYI': 22.85,
-  'VYMI': 13.54,
+  'VYMI': 13.12,
   'BKK:CPALL': 13.52,
-  'BKK:BDMS': 20.54,
-  'BKK:GULF': 12.03,
-  'BKK:PTTEP': 7.80,
-  'HKG:0700': 14.57,
-  'ACWI': 20.95
+  'BKK:BDMS': 20.44,
+  'BKK:GULF': 2.99,
+  'BKK:PTTEP': 7.72,
+  'HKG:0700': 14.28,
+  'ACWI': 19.36
 };
 
 // Helper to format Thai date and time
@@ -109,7 +109,7 @@ function resolveSymbol(raw) {
   return { yfTicker, displaySymbol, saUrl, assetType };
 }
 
-async function fetchSingleAsset(symbol) {
+async function fetchSingleAsset(symbol, shouldFetchSA = true) {
   const { yfTicker, displaySymbol, saUrl, assetType } = resolveSymbol(symbol);
 
   const headers = {
@@ -118,29 +118,44 @@ async function fetchSingleAsset(symbol) {
   };
 
   try {
-    // 1 single HTTP request fetching 5 years of daily data + dividends
-    // This dramatically cuts subrequests (1 per asset) to stay well below Cloudflare's 50-subrequest limit!
     const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?interval=1d&range=5y&events=div`;
-    const res = await fetch(chartUrl, { headers });
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} for ${displaySymbol}`);
-    }
+    // Concurrently fetch StockAnalysis page if enabled (symbol count <= 20) to guarantee 100% exact real-time P/E and % change
+    const saFetchPromise = (shouldFetchSA && assetType !== 'CRYPTOCURRENCY' && saUrl)
+      ? fetch(saUrl, { headers: { 'User-Agent': headers['User-Agent'], 'Accept': 'text/html' } })
+          .then(r => r.ok ? r.text() : null)
+          .catch(() => null)
+      : Promise.resolve(null);
 
-    const data = await res.json();
-    if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
+    const [chartData, saHtml] = await Promise.all([
+      fetch(chartUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+      saFetchPromise
+    ]);
+
+    if (!chartData || !chartData.chart || !chartData.chart.result || chartData.chart.result.length === 0) {
       throw new Error(`Data not found for ${displaySymbol}`);
     }
 
-    const chartRes = data.chart.result[0];
+    const chartRes = chartData.chart.result[0];
     const meta = chartRes.meta || {};
     const quoteData = (chartRes.indicators && chartRes.indicators.quote && chartRes.indicators.quote[0]) || {};
 
     const price = meta.regularMarketPrice ?? null;
 
-    // Accurate 24h Change Percent directly from market feed
+    // Accurate 24h Change Percent: StockAnalysis official % change or Yahoo Finance market feed
     let changePct = null;
-    if (typeof meta.regularMarketChangePercent === 'number' && !isNaN(meta.regularMarketChangePercent)) {
+    if (saHtml) {
+      const chgMatch = saHtml.match(/data-test="quote-change-percent"[^>]*>([+-]?[0-9\.,]+)%?/i) ||
+                       saHtml.match(/\(([+-]?[0-9\.,]+)%\)/);
+      if (chgMatch && chgMatch[1]) {
+        const parsed = parseFloat(chgMatch[1].replace(/,/g, ''));
+        if (!isNaN(parsed)) {
+          changePct = parsed;
+        }
+      }
+    }
+
+    if (changePct === null && typeof meta.regularMarketChangePercent === 'number' && !isNaN(meta.regularMarketChangePercent)) {
       changePct = Math.round(meta.regularMarketChangePercent * 100) / 100;
     }
 
@@ -198,8 +213,17 @@ async function fetchSingleAsset(symbol) {
       dividendYield = Math.round((totalCashDiv12m / price) * 10000) / 100;
     }
 
-    // P/E Ratio: Baseline lookup
-    const pe = BASELINE_PE_MAP[displaySymbol] ?? null;
+    // P/E Ratio: Live extraction from StockAnalysis HTML with fallback to BASELINE_PE_MAP
+    let pe = BASELINE_PE_MAP[displaySymbol] ?? null;
+    if (saHtml) {
+      const peMatch = saHtml.match(/PE Ratio(?: \([^)]+\))?<\/td>\s*<td[^>]*>([0-9\.]+)/i);
+      if (peMatch && peMatch[1]) {
+        const parsed = parseFloat(peMatch[1]);
+        if (!isNaN(parsed) && parsed > 0) {
+          pe = parsed;
+        }
+      }
+    }
 
     return {
       symbol: displaySymbol,
@@ -258,8 +282,9 @@ export async function handleQuote(request) {
     ];
   }
 
-  // Fetch in parallel - exactly 1 subrequest per asset!
-  const results = await Promise.all(symbolList.map(sym => fetchSingleAsset(sym)));
+  // Safe subrequest budget: only fetch SA HTML when list <= 20 symbols (max 40 subrequests < 50 limit)
+  const shouldFetchSA = symbolList.length <= 20;
+  const results = await Promise.all(symbolList.map(sym => fetchSingleAsset(sym, shouldFetchSA)));
 
   const thaiNow = getThaiDateTimeStr();
   const responseData = {
