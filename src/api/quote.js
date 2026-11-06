@@ -1,6 +1,6 @@
 /**
  * Watchvest Quote API Handler
- * Fetches real-time price, % change, RSI (Daily, Weekly, Monthly), P/E ratio, and Dividend Yield.
+ * High-performance single-request multi-timeframe indicator engine
  */
 
 const BASELINE_PE_MAP = {
@@ -118,76 +118,75 @@ async function fetchSingleAsset(symbol) {
   };
 
   try {
-    // 1. Fetch Daily Chart + Dividends (1 Year)
-    const dailyUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?interval=1d&range=1y&events=div`;
-    // 2. Fetch Weekly Chart (2 Years)
-    const weeklyUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?interval=1wk&range=2y`;
-    // 3. Fetch Monthly Chart (5 Years)
-    const monthlyUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?interval=1mo&range=5y`;
+    // 1 single HTTP request fetching 5 years of daily data + dividends
+    // This dramatically cuts subrequests (1 per asset) to stay well below Cloudflare's 50-subrequest limit!
+    const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?interval=1d&range=5y&events=div`;
+    const res = await fetch(chartUrl, { headers });
 
-    // 4. Fetch StockAnalysis page for real-time P/E ratio if available
-    const saFetchPromise = (assetType !== 'CRYPTOCURRENCY' && saUrl)
-      ? fetch(saUrl, { headers }).then(r => r.ok ? r.text() : null).catch(() => null)
-      : Promise.resolve(null);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} for ${displaySymbol}`);
+    }
 
-    const [dailyRes, weeklyRes, monthlyRes, saHtml] = await Promise.all([
-      fetch(dailyUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(weeklyUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(monthlyUrl, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
-      saFetchPromise
-    ]);
-
-    if (!dailyRes || !dailyRes.chart || !dailyRes.chart.result || dailyRes.chart.result.length === 0) {
+    const data = await res.json();
+    if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
       throw new Error(`Data not found for ${displaySymbol}`);
     }
 
-    const chartRes = dailyRes.chart.result[0];
+    const chartRes = data.chart.result[0];
     const meta = chartRes.meta || {};
     const quoteData = (chartRes.indicators && chartRes.indicators.quote && chartRes.indicators.quote[0]) || {};
 
     const price = meta.regularMarketPrice ?? null;
 
-    // Accurate 24h Change Percentage (using official market change percent or last 2 daily candles)
+    // Accurate 24h Change Percent directly from market feed
     let changePct = null;
     if (typeof meta.regularMarketChangePercent === 'number' && !isNaN(meta.regularMarketChangePercent)) {
       changePct = Math.round(meta.regularMarketChangePercent * 100) / 100;
-    } else {
-      const validCloses = (quoteData.close || []).filter(c => typeof c === 'number' && !isNaN(c));
-      if (validCloses.length >= 2 && price !== null) {
-        const prevDayClose = validCloses[validCloses.length - 2];
-        if (prevDayClose && prevDayClose !== 0) {
-          changePct = Math.round(((price - prevDayClose) / prevDayClose) * 10000) / 100;
-        }
+    }
+
+    // Extract valid timestamp-close pairs
+    const timestamps = chartRes.timestamp || [];
+    const rawCloses = quoteData.close || [];
+    const validPairs = [];
+    for (let i = 0; i < rawCloses.length; i++) {
+      const c = rawCloses[i];
+      const t = timestamps[i];
+      if (typeof c === 'number' && !isNaN(c) && t) {
+        validPairs.push({ t, c });
       }
     }
 
-    // P/E Ratio: Extract from StockAnalysis HTML or fallback to BASELINE_PE_MAP
-    let pe = BASELINE_PE_MAP[displaySymbol] ?? null;
-    if (saHtml) {
-      const peMatch = saHtml.match(/PE Ratio<\/td>\s*<td[^>]*>([0-9\.]+)/i);
-      if (peMatch && peMatch[1]) {
-        const parsedPe = parseFloat(peMatch[1]);
-        if (!isNaN(parsedPe) && parsedPe > 0) {
-          pe = parsedPe;
-        }
+    // Fallback 24h change calculation from closes if needed
+    if (changePct === null && validPairs.length >= 2 && price !== null) {
+      const prevClose = validPairs[validPairs.length - 2].c;
+      if (prevClose && prevClose !== 0) {
+        changePct = Math.round(((price - prevClose) / prevClose) * 10000) / 100;
       }
     }
 
-    // RSIs
-    const dailyCloses = quoteData.close || [];
+    // 1. Daily RSI (14)
+    const dailyCloses = validPairs.map(p => p.c);
     const rsiDaily = calculateWilderRSI(dailyCloses, 14);
 
-    let rsiWeekly = null;
-    if (weeklyRes && weeklyRes.chart && weeklyRes.chart.result && weeklyRes.chart.result[0]) {
-      const wkQuote = (weeklyRes.chart.result[0].indicators && weeklyRes.chart.result[0].indicators.quote && weeklyRes.chart.result[0].indicators.quote[0]) || {};
-      rsiWeekly = calculateWilderRSI(wkQuote.close || [], 14);
+    // 2. Weekly RSI (14) - Resampled from last close of each week (Monday to Sunday)
+    const weeklyMap = new Map();
+    for (const p of validPairs) {
+      // 345600s = 4 days, aligning Unix epoch (Thu Jan 1 1970) to Monday week buckets
+      const weekIdx = Math.floor((p.t + 345600) / 604800);
+      weeklyMap.set(weekIdx, p.c);
     }
+    const weeklyCloses = Array.from(weeklyMap.values());
+    const rsiWeekly = calculateWilderRSI(weeklyCloses, 14);
 
-    let rsiMonthly = null;
-    if (monthlyRes && monthlyRes.chart && monthlyRes.chart.result && monthlyRes.chart.result[0]) {
-      const moQuote = (monthlyRes.chart.result[0].indicators && monthlyRes.chart.result[0].indicators.quote && monthlyRes.chart.result[0].indicators.quote[0]) || {};
-      rsiMonthly = calculateWilderRSI(moQuote.close || [], 14);
+    // 3. Monthly RSI (14) - Resampled from last close of each calendar month
+    const monthlyMap = new Map();
+    for (const p of validPairs) {
+      const d = new Date(p.t * 1000);
+      const moKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      monthlyMap.set(moKey, p.c);
     }
+    const monthlyCloses = Array.from(monthlyMap.values());
+    const rsiMonthly = calculateWilderRSI(monthlyCloses, 14);
 
     // TTM Dividend Yield calculation from cash distributions in past 12 months
     let dividendYield = null;
@@ -198,6 +197,9 @@ async function fetchSingleAsset(symbol) {
       const totalCashDiv12m = divValues.reduce((sum, d) => sum + (d.amount || 0), 0);
       dividendYield = Math.round((totalCashDiv12m / price) * 10000) / 100;
     }
+
+    // P/E Ratio: Baseline lookup
+    const pe = BASELINE_PE_MAP[displaySymbol] ?? null;
 
     return {
       symbol: displaySymbol,
@@ -250,14 +252,13 @@ export async function handleQuote(request) {
   }
 
   if (symbolList.length === 0) {
-    // Default symbol list
     symbolList = [
       'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'SCHD', 'BTC-USD', 'TSM',
       'SPYI', 'VYMI', 'BKK:CPALL', 'BKK:BDMS', 'BKK:GULF', 'IAUI', 'HKG:0700', 'ACWI', 'BKK:PTTEP'
     ];
   }
 
-  // Fetch in parallel
+  // Fetch in parallel - exactly 1 subrequest per asset!
   const results = await Promise.all(symbolList.map(sym => fetchSingleAsset(sym)));
 
   const thaiNow = getThaiDateTimeStr();

@@ -308,7 +308,17 @@ async function fetchActiveListMarketData(forceRefresh = false) {
       const data = await res.json();
       if (Array.isArray(data.assets)) {
         data.assets.forEach(asset => {
-          marketDataMap.set(asset.symbol, asset);
+          const prev = marketDataMap.get(asset.symbol) || {};
+          const merged = {
+            ...prev,
+            ...asset,
+            pe: (asset.pe !== null && asset.pe !== undefined) ? asset.pe : (prev.pe ?? null),
+            dividend_yield: (asset.dividend_yield !== null && asset.dividend_yield !== undefined) ? asset.dividend_yield : (prev.dividend_yield ?? null),
+            rsi_daily: (asset.rsi_daily !== null && asset.rsi_daily !== undefined) ? asset.rsi_daily : (prev.rsi_daily ?? null),
+            rsi_weekly: (asset.rsi_weekly !== null && asset.rsi_weekly !== undefined) ? asset.rsi_weekly : (prev.rsi_weekly ?? null),
+            rsi_monthly: (asset.rsi_monthly !== null && asset.rsi_monthly !== undefined) ? asset.rsi_monthly : (prev.rsi_monthly ?? null),
+          };
+          marketDataMap.set(asset.symbol, merged);
         });
         if (data.last_updated) {
           lastUpdatedBadge.textContent = data.last_updated;
@@ -329,7 +339,17 @@ async function fetchActiveListMarketData(forceRefresh = false) {
         const fallbackData = await fallbackRes.json();
         if (Array.isArray(fallbackData.assets)) {
           fallbackData.assets.forEach(asset => {
-            marketDataMap.set(asset.symbol, asset);
+            const prev = marketDataMap.get(asset.symbol) || {};
+            const merged = {
+              ...prev,
+              ...asset,
+              pe: (asset.pe !== null && asset.pe !== undefined) ? asset.pe : (prev.pe ?? null),
+              dividend_yield: (asset.dividend_yield !== null && asset.dividend_yield !== undefined) ? asset.dividend_yield : (prev.dividend_yield ?? null),
+              rsi_daily: (asset.rsi_daily !== null && asset.rsi_daily !== undefined) ? asset.rsi_daily : (prev.rsi_daily ?? null),
+              rsi_weekly: (asset.rsi_weekly !== null && asset.rsi_weekly !== undefined) ? asset.rsi_weekly : (prev.rsi_weekly ?? null),
+              rsi_monthly: (asset.rsi_monthly !== null && asset.rsi_monthly !== undefined) ? asset.rsi_monthly : (prev.rsi_monthly ?? null),
+            };
+            marketDataMap.set(asset.symbol, merged);
           });
           if (fallbackData.last_updated) {
             lastUpdatedBadge.textContent = fallbackData.last_updated;
