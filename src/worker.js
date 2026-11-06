@@ -1,9 +1,9 @@
 /**
  * Cloudflare Worker Entrypoint
- * Handles both API routes and static asset serving
+ * Handles API routes (/api/quote, /api/search, /api/data) and static asset delivery
  */
-import { onRequest as quoteHandler } from '../functions/api/quote.js';
-import { onRequest as searchHandler } from '../functions/api/search.js';
+import { handleQuote } from './api/quote.js';
+import { handleSearch } from './api/search.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -11,16 +11,16 @@ export default {
 
     // API Routes
     if (url.pathname === '/api/quote' || url.pathname.startsWith('/api/quote')) {
-      return quoteHandler({ request, env, ctx });
+      return handleQuote(request);
     }
     if (url.pathname === '/api/search' || url.pathname.startsWith('/api/search')) {
-      return searchHandler({ request, env, ctx });
+      return handleSearch(request);
     }
     if (url.pathname === '/api/data' || url.pathname.startsWith('/api/data')) {
-      return quoteHandler({ request, env, ctx });
+      return handleQuote(request);
     }
 
-    // Static Assets Fallback
+    // Static Assets Fallback (Serves index.html, style.css, app.js, data/stocks.json)
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     }

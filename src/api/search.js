@@ -1,5 +1,5 @@
 /**
- * Cloudflare Pages Function: /api/search
+ * Watchvest Search API Handler
  * Proxies and normalizes search autocomplete queries
  */
 
@@ -16,8 +16,7 @@ const THAI_TOP_STOCKS = [
   { symbol: 'BKK:DELTA', name: 'Delta Electronics (Thailand)', type: 'STOCK', exchange: 'SET' }
 ];
 
-export async function onRequest(context) {
-  const { request } = context;
+export async function handleSearch(request) {
   const url = new URL(request.url);
   const q = (url.searchParams.get('q') || '').trim();
 
@@ -82,7 +81,6 @@ export async function onRequest(context) {
 
   // Combine results with Thai stocks
   const combined = [...matchedThai, ...externalResults];
-  // Deduplicate by symbol
   const seen = new Set();
   const deduplicated = [];
   for (const item of combined) {

@@ -1,5 +1,5 @@
 /**
- * Cloudflare Pages Function: /api/quote
+ * Watchvest Quote API Handler
  * Fetches real-time price, % change, RSI (Daily, Weekly, Monthly), and TTM Dividend Yield.
  */
 
@@ -196,8 +196,7 @@ async function fetchSingleAsset(symbol) {
   }
 }
 
-export async function onRequest(context) {
-  const { request } = context;
+export async function handleQuote(request) {
   const url = new URL(request.url);
   const symbolsParam = url.searchParams.get('symbols') || url.searchParams.get('symbol') || '';
 
@@ -230,7 +229,7 @@ export async function onRequest(context) {
       'Content-Type': 'application/json; charset=utf-8',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Cache-Control': 'public, max-age=60' // Cloudflare Edge Cache for 60 seconds
+      'Cache-Control': 'public, max-age=60'
     }
   });
 }
