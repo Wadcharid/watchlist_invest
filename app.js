@@ -1,87 +1,586 @@
 /**
- * Investment Watchlist Application
- * Connects with stockanalysis.com and GitHub Actions data
+ * Watchvest Application Script
+ * Faithful replication of StockAnalysis.com Watchlist with Cloudflare Pages Functions
  */
 
 const STORAGE_KEYS = {
-  WATCHLIST: 'invest_watchlist_tickers',
-  GITHUB_PAT: 'invest_github_pat'
+  WATCHLISTS: 'watchvest_watchlists',
+  ACTIVE_LIST_ID: 'watchvest_active_list_id',
+  THEME: 'watchvest_theme',
+  GITHUB_PAT: 'watchvest_github_pat',
+  VIEW_MODE: 'watchvest_view_mode'
 };
 
-const GITHUB_REPO = 'Wadcharid/watchlist_invest';
+const GITHUB_REPO = 'Wadcharid/watchvest';
 
-let allStocksData = [];
-let userWatchlist = [];
-let currentCategory = 'ALL';
-let currentSearch = '';
-let currentRsiFilter = 'ALL';
+// Default Watchlist Configuration
+const DEFAULT_WATCHLISTS = {
+  'main': {
+    id: 'main',
+    name: 'พอร์ตหลัก (Main)',
+    symbols: [
+      'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'SCHD', 'BTC-USD', 'TSM',
+      'SPYI', 'VYMI', 'BKK:CPALL', 'BKK:BDMS', 'BKK:GULF', 'IAUI', 'HKG:0700', 'ACWI', 'BKK:PTTEP'
+    ]
+  },
+  'dividend': {
+    id: 'dividend',
+    name: 'หุ้น & กองทุนปันผล',
+    symbols: ['SCHD', 'SPYI', 'VYMI', 'IAUI', 'BKK:CPALL', 'BKK:BDMS', 'BKK:PTTEP']
+  },
+  'tech': {
+    id: 'tech',
+    name: 'US Tech & Growth',
+    symbols: ['NVDA', 'MSFT', 'GOOGL', 'AMZN', 'TSM']
+  }
+};
+
+// Global App State
+let appWatchlists = {};
+let activeListId = 'main';
+let marketDataMap = new Map(); // symbol -> data object
+let activeView = 'overview'; // 'overview', 'technical', 'dividends', 'all'
+let activeCategory = 'ALL';
+let activeRsiFilter = 'ALL';
+let tableSearchQuery = '';
 let currentSort = { column: 'symbol', order: 'asc' };
+let searchDebounceTimer = null;
 
-// Elements
+// DOM Elements
+const globalSearchInput = document.getElementById('globalSearchInput');
+const searchDropdown = document.getElementById('searchDropdown');
+const lastUpdatedBadge = document.getElementById('lastUpdatedBadge');
+const btnRefresh = document.getElementById('btnRefresh');
+const btnRefreshLabel = document.getElementById('btnRefreshLabel');
+const btnThemeToggle = document.getElementById('btnThemeToggle');
+const btnOpenSettings = document.getElementById('btnOpenSettings');
+
+const watchlistsTabsContainer = document.getElementById('watchlistsTabsContainer');
+const btnNewWatchlist = document.getElementById('btnNewWatchlist');
+const btnListMenu = document.getElementById('btnListMenu');
+const listMenuDropdown = document.getElementById('listMenuDropdown');
+const menuRenameList = document.getElementById('menuRenameList');
+const menuDuplicateList = document.getElementById('menuDuplicateList');
+const menuDeleteList = document.getElementById('menuDeleteList');
+
+const viewSwitcher = document.getElementById('viewSwitcher');
+const categoryPills = document.getElementById('categoryPills');
+const rsiZoneFilter = document.getElementById('rsiZoneFilter');
+const tableFilterInput = document.getElementById('tableFilterInput');
+
+const tableHeader = document.getElementById('tableHeader');
 const tableBody = document.getElementById('tableBody');
 const emptyState = document.getElementById('emptyState');
-const searchInput = document.getElementById('searchInput');
-const rsiFilter = document.getElementById('rsiFilter');
-const addAssetForm = document.getElementById('addAssetForm');
-const newSymbolInput = document.getElementById('newSymbolInput');
-const lastUpdatedText = document.getElementById('lastUpdatedText');
-const btnRefreshMarket = document.getElementById('btnRefreshMarket');
-const btnRefreshText = document.getElementById('btnRefreshText');
+const btnSeedDefault = document.getElementById('btnSeedDefault');
 
-// Banner Elements
-const pendingSyncBanner = document.getElementById('pendingSyncBanner');
-const pendingCount = document.getElementById('pendingCount');
-const pendingListText = document.getElementById('pendingListText');
-const btnQuickSync = document.getElementById('btnQuickSync');
+const statTotal = document.getElementById('statTotal');
+const statGainers = document.getElementById('statGainers');
+const statLosers = document.getElementById('statLosers');
+const statOversold = document.getElementById('statOversold');
+const statOverbought = document.getElementById('statOverbought');
 
-// Stat Elements
-const statTotalCount = document.getElementById('statTotalCount');
-const statGainersCount = document.getElementById('statGainersCount');
-const statLosersCount = document.getElementById('statLosersCount');
-const statOversoldCount = document.getElementById('statOversoldCount');
-const statOverboughtCount = document.getElementById('statOverboughtCount');
-const countAll = document.getElementById('countAll');
+// Modals
+const settingsModal = document.getElementById('settingsModal');
+const btnCloseSettings = document.getElementById('btnCloseSettings');
+const btnDoneSettings = document.getElementById('btnDoneSettings');
+const modalWatchlistJson = document.getElementById('modalWatchlistJson');
+const btnApplyModalJson = document.getElementById('btnApplyModalJson');
+const btnCopyModalJson = document.getElementById('btnCopyModalJson');
+const modalGithubPat = document.getElementById('modalGithubPat');
+const btnSavePat = document.getElementById('btnSavePat');
+const btnSyncToGithub = document.getElementById('btnSyncToGithub');
+const githubSyncStatus = document.getElementById('githubSyncStatus');
+const btnResetToDefaults = document.getElementById('btnResetToDefaults');
 
-// Modal Elements
-const syncModal = document.getElementById('syncModal');
-const btnOpenSync = document.getElementById('btnOpenSync');
-const btnCloseSync = document.getElementById('btnCloseSync');
-const btnDoneSync = document.getElementById('btnDoneSync');
-const watchlistTextarea = document.getElementById('watchlistTextarea');
-const btnApplyJson = document.getElementById('btnApplyJson');
-const btnCopyJson = document.getElementById('btnCopyJson');
-const btnDownloadJson = document.getElementById('btnDownloadJson');
-const btnResetWatchlist = document.getElementById('btnResetWatchlist');
-const githubTokenInput = document.getElementById('githubTokenInput');
-const btnSyncToGitHub = document.getElementById('btnSyncToGitHub');
-const syncStatus = document.getElementById('syncStatus');
+const renameModal = document.getElementById('renameModal');
+const renameModalTitle = document.getElementById('renameModalTitle');
+const renameInput = document.getElementById('renameInput');
+const btnCloseRename = document.getElementById('btnCloseRename');
+const btnCancelRename = document.getElementById('btnCancelRename');
+const btnConfirmRename = document.getElementById('btnConfirmRename');
 
-// Toast Notification
-function showToast(message, duration = 3000) {
-  const toast = document.getElementById('toast');
-  toast.textContent = message;
-  toast.style.display = 'block';
-  setTimeout(() => {
-    toast.style.display = 'none';
-  }, duration);
+const toast = document.getElementById('toast');
+
+/* ==========================================================================
+   Initialization
+   ========================================================================== */
+function initApp() {
+  initTheme();
+  loadWatchlistsState();
+  initViewMode();
+  setupEventListeners();
+
+  // Initial Fetch Data
+  fetchActiveListMarketData();
 }
 
-// Format numbers
-function formatPrice(val, currency = 'USD') {
-  if (val === null || val === undefined) return '-';
-  let prefix = '$';
-  if (currency === 'THB') prefix = '฿';
-  else if (currency === 'HKD') prefix = 'HK$';
-  else if (currency !== 'USD') prefix = currency + ' ';
+function initTheme() {
+  const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) || 'dark';
+  document.documentElement.className = savedTheme;
+}
 
-  if (val >= 1000) {
-    return prefix + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function toggleTheme() {
+  const isDark = document.documentElement.classList.contains('dark');
+  const nextTheme = isDark ? 'light' : 'dark';
+  document.documentElement.className = nextTheme;
+  localStorage.setItem(STORAGE_KEYS.THEME, nextTheme);
+  showToast(`สลับเป็นธีม ${nextTheme === 'dark' ? 'Dark' : 'Light'}`);
+}
+
+function initViewMode() {
+  const savedView = localStorage.getItem(STORAGE_KEYS.VIEW_MODE);
+  if (savedView && ['overview', 'technical', 'dividends', 'all'].includes(savedView)) {
+    activeView = savedView;
   }
-  return prefix + val.toFixed(2);
+  updateViewSwitcherButtons();
+}
+
+function updateViewSwitcherButtons() {
+  viewSwitcher.querySelectorAll('.view-btn').forEach(btn => {
+    if (btn.dataset.view === activeView) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+}
+
+/* ==========================================================================
+   Watchlists State Management
+   ========================================================================== */
+function loadWatchlistsState() {
+  const saved = localStorage.getItem(STORAGE_KEYS.WATCHLISTS);
+  if (saved) {
+    try {
+      appWatchlists = JSON.parse(saved);
+    } catch (e) {
+      console.warn('Error reading saved watchlists:', e);
+      appWatchlists = JSON.parse(JSON.stringify(DEFAULT_WATCHLISTS));
+    }
+  } else {
+    appWatchlists = JSON.parse(JSON.stringify(DEFAULT_WATCHLISTS));
+    saveWatchlists();
+  }
+
+  const savedActiveId = localStorage.getItem(STORAGE_KEYS.ACTIVE_LIST_ID);
+  if (savedActiveId && appWatchlists[savedActiveId]) {
+    activeListId = savedActiveId;
+  } else {
+    activeListId = Object.keys(appWatchlists)[0] || 'main';
+  }
+
+  renderWatchlistTabs();
+}
+
+function saveWatchlists() {
+  localStorage.setItem(STORAGE_KEYS.WATCHLISTS, JSON.stringify(appWatchlists));
+  localStorage.setItem(STORAGE_KEYS.ACTIVE_LIST_ID, activeListId);
+}
+
+function getActiveWatchlist() {
+  if (!appWatchlists[activeListId]) {
+    activeListId = Object.keys(appWatchlists)[0] || 'main';
+  }
+  return appWatchlists[activeListId] || { id: 'main', name: 'พอร์ตหลัก', symbols: [] };
+}
+
+function renderWatchlistTabs() {
+  watchlistsTabsContainer.innerHTML = '';
+  Object.values(appWatchlists).forEach(list => {
+    const tab = document.createElement('button');
+    tab.className = `watchlist-tab ${list.id === activeListId ? 'active' : ''}`;
+    tab.innerHTML = `
+      <span>${escapeHtml(list.name)}</span>
+      <span class="tab-badge">${list.symbols.length}</span>
+    `;
+    tab.addEventListener('click', () => {
+      if (activeListId !== list.id) {
+        activeListId = list.id;
+        saveWatchlists();
+        renderWatchlistTabs();
+        renderTable();
+        fetchActiveListMarketData();
+      }
+    });
+    watchlistsTabsContainer.appendChild(tab);
+  });
+}
+
+function createNewWatchlist(name) {
+  const listName = (name || '').trim() || `Watchlist ${Object.keys(appWatchlists).length + 1}`;
+  const newId = 'list_' + Date.now();
+  appWatchlists[newId] = {
+    id: newId,
+    name: listName,
+    symbols: []
+  };
+  activeListId = newId;
+  saveWatchlists();
+  renderWatchlistTabs();
+  renderTable();
+  showToast(`🎉 สร้าง Watchlist "${listName}" เรียบร้อย`);
+}
+
+function deleteCurrentWatchlist() {
+  const keys = Object.keys(appWatchlists);
+  if (keys.length <= 1) {
+    alert('ต้องมีอย่างน้อย 1 Watchlist ในระบบครับ');
+    return;
+  }
+  const current = getActiveWatchlist();
+  if (confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบ Watchlist "${current.name}"?`)) {
+    delete appWatchlists[activeListId];
+    activeListId = Object.keys(appWatchlists)[0];
+    saveWatchlists();
+    renderWatchlistTabs();
+    renderTable();
+    fetchActiveListMarketData();
+    showToast(`🗑️ ลบ Watchlist เรียบร้อยแล้ว`);
+  }
+}
+
+function duplicateCurrentWatchlist() {
+  const current = getActiveWatchlist();
+  const newId = 'list_' + Date.now();
+  appWatchlists[newId] = {
+    id: newId,
+    name: `${current.name} (คัดลอก)`,
+    symbols: [...current.symbols]
+  };
+  activeListId = newId;
+  saveWatchlists();
+  renderWatchlistTabs();
+  renderTable();
+  showToast(`📋 คัดลอก Watchlist เรียบร้อย`);
+}
+
+/* ==========================================================================
+   Data Fetching Engine (Cloudflare Edge Function + Fallback)
+   ========================================================================== */
+async function fetchActiveListMarketData(forceRefresh = false) {
+  const list = getActiveWatchlist();
+  if (!list.symbols || list.symbols.length === 0) {
+    renderTable();
+    return;
+  }
+
+  setRefreshLoading(true);
+
+  const symbolsParam = list.symbols.join(',');
+  const cacheBuster = forceRefresh ? `&_t=${Date.now()}` : '';
+
+  try {
+    // 1. Try Cloudflare Pages Function endpoint
+    const edgeUrl = `/api/quote?symbols=${encodeURIComponent(symbolsParam)}${cacheBuster}`;
+    const res = await fetch(edgeUrl, { cache: forceRefresh ? 'no-store' : 'default' });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.assets)) {
+        data.assets.forEach(asset => {
+          marketDataMap.set(asset.symbol, asset);
+        });
+        if (data.last_updated) {
+          lastUpdatedBadge.textContent = data.last_updated;
+        }
+        renderTable();
+        setRefreshLoading(false);
+        if (forceRefresh) showToast('🎉 อัปเดตราคาและ RSI ล่าสุดเรียบร้อยแล้ว');
+        return;
+      }
+    }
+    throw new Error('Edge API not available or empty');
+  } catch (err) {
+    console.warn('Falling back to data/stocks.json:', err);
+    // 2. Fallback to data/stocks.json
+    try {
+      const fallbackRes = await fetch(`data/stocks.json?t=${Date.now()}`, { cache: 'no-store' });
+      if (fallbackRes.ok) {
+        const fallbackData = await fallbackRes.json();
+        if (Array.isArray(fallbackData.assets)) {
+          fallbackData.assets.forEach(asset => {
+            marketDataMap.set(asset.symbol, asset);
+          });
+          if (fallbackData.last_updated) {
+            lastUpdatedBadge.textContent = fallbackData.last_updated;
+          }
+        }
+      }
+    } catch (fbErr) {
+      console.error('All fetch sources failed:', fbErr);
+    }
+  }
+
+  setRefreshLoading(false);
+  renderTable();
+}
+
+function setRefreshLoading(isLoading) {
+  if (isLoading) {
+    btnRefresh.disabled = true;
+    btnRefresh.querySelector('.refresh-svg').classList.add('spin-anim');
+    btnRefreshLabel.textContent = 'กำลังโหลด...';
+  } else {
+    btnRefresh.disabled = false;
+    btnRefresh.querySelector('.refresh-svg').classList.remove('spin-anim');
+    btnRefreshLabel.textContent = 'รีเฟรช';
+  }
+}
+
+/* ==========================================================================
+   Table Rendering & Columns (StockAnalysis Views)
+   ========================================================================== */
+function renderTable() {
+  const currentList = getActiveWatchlist();
+  const symbols = currentList.symbols || [];
+
+  if (symbols.length === 0) {
+    tableHeader.innerHTML = '';
+    tableBody.innerHTML = '';
+    emptyState.classList.remove('hidden');
+    updateSummaryStats([]);
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+
+  // Build items from map or placeholder
+  let items = symbols.map(sym => {
+    const data = marketDataMap.get(sym);
+    if (data) return data;
+    return {
+      symbol: sym,
+      name: sym,
+      type: resolveAssetType(sym),
+      currency: sym.startsWith('BKK:') ? 'THB' : sym.startsWith('HKG:') ? 'HKD' : 'USD',
+      price: null,
+      change_pct: null,
+      pe: null,
+      dividend_yield: null,
+      rsi_daily: null,
+      rsi_weekly: null,
+      rsi_monthly: null,
+      volume: null,
+      high_52w: null,
+      low_52w: null,
+      stockanalysis_url: getStockAnalysisUrl(sym)
+    };
+  });
+
+  // Category Filter
+  if (activeCategory !== 'ALL') {
+    if (activeCategory === 'SET') {
+      items = items.filter(a => a.symbol.startsWith('BKK:'));
+    } else {
+      items = items.filter(a => a.type === activeCategory && !a.symbol.startsWith('BKK:'));
+    }
+  }
+
+  // RSI Filter
+  if (activeRsiFilter === 'OVERSOLD') {
+    items = items.filter(a => a.rsi_daily !== null && a.rsi_daily < 30);
+  } else if (activeRsiFilter === 'NEUTRAL') {
+    items = items.filter(a => a.rsi_daily !== null && a.rsi_daily >= 30 && a.rsi_daily <= 70);
+  } else if (activeRsiFilter === 'OVERBOUGHT') {
+    items = items.filter(a => a.rsi_daily !== null && a.rsi_daily > 70);
+  }
+
+  // Search Filter within list
+  if (tableSearchQuery) {
+    const q = tableSearchQuery.toUpperCase();
+    items = items.filter(a => a.symbol.toUpperCase().includes(q) || (a.name && a.name.toUpperCase().includes(q)));
+  }
+
+  // Sort items
+  sortItems(items);
+
+  // Render Table Header
+  renderTableHeader();
+
+  // Render Table Body
+  renderTableBody(items);
+
+  // Update Stats
+  updateSummaryStats(items);
+}
+
+function renderTableHeader() {
+  let thHtml = '';
+  const makeTh = (colKey, label, align = 'left') => {
+    const isSorted = currentSort.column === colKey;
+    const sortCls = isSorted ? (currentSort.order === 'asc' ? 'sort-asc' : 'sort-desc') : '';
+    const alignCls = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : '';
+    return `<th class="${sortCls} ${alignCls}" onclick="handleSort('${colKey}')">${label}</th>`;
+  };
+
+  if (activeView === 'overview') {
+    thHtml = `
+      <tr>
+        <th style="width: 40px;" class="text-center">#</th>
+        ${makeTh('symbol', 'Symbol / สินทรัพย์')}
+        ${makeTh('price', 'ราคาล่าสุด', 'right')}
+        ${makeTh('change_pct', '% เปลี่ยนแปลง', 'right')}
+        ${makeTh('pe', 'P/E Ratio', 'right')}
+        ${makeTh('dividend_yield', 'Dividend Yield', 'right')}
+        ${makeTh('volume', 'Volume', 'right')}
+        ${makeTh('high_52w', '52W High', 'right')}
+        <th class="text-center" style="width: 60px;">จัดการ</th>
+      </tr>
+    `;
+  } else if (activeView === 'technical') {
+    thHtml = `
+      <tr>
+        <th style="width: 40px;" class="text-center">#</th>
+        ${makeTh('symbol', 'Symbol / สินทรัพย์')}
+        ${makeTh('price', 'ราคาล่าสุด', 'right')}
+        ${makeTh('change_pct', '% เปลี่ยนแปลง', 'right')}
+        ${makeTh('rsi_daily', 'Daily RSI (14)', 'center')}
+        ${makeTh('rsi_weekly', 'Weekly RSI (14)', 'center')}
+        ${makeTh('rsi_monthly', 'Monthly RSI (14)', 'center')}
+        <th class="text-center">โซน RSI</th>
+        <th class="text-center" style="width: 60px;">จัดการ</th>
+      </tr>
+    `;
+  } else if (activeView === 'dividends') {
+    thHtml = `
+      <tr>
+        <th style="width: 40px;" class="text-center">#</th>
+        ${makeTh('symbol', 'Symbol / สินทรัพย์')}
+        ${makeTh('price', 'ราคาล่าสุด', 'right')}
+        ${makeTh('change_pct', '% เปลี่ยนแปลง', 'right')}
+        ${makeTh('dividend_yield', 'Dividend Yield (TTM)', 'right')}
+        ${makeTh('pe', 'P/E Ratio', 'right')}
+        <th class="text-center" style="width: 60px;">จัดการ</th>
+      </tr>
+    `;
+  } else {
+    // All Columns
+    thHtml = `
+      <tr>
+        <th style="width: 40px;" class="text-center">#</th>
+        ${makeTh('symbol', 'Symbol / สินทรัพย์')}
+        ${makeTh('price', 'ราคาล่าสุด', 'right')}
+        ${makeTh('change_pct', '% เปลี่ยนแปลง', 'right')}
+        ${makeTh('pe', 'P/E', 'right')}
+        ${makeTh('dividend_yield', 'Div Yield', 'right')}
+        ${makeTh('rsi_daily', 'Daily RSI', 'center')}
+        ${makeTh('rsi_weekly', 'Weekly RSI', 'center')}
+        ${makeTh('rsi_monthly', 'Monthly RSI', 'center')}
+        ${makeTh('volume', 'Volume', 'right')}
+        ${makeTh('high_52w', '52W High', 'right')}
+        ${makeTh('low_52w', '52W Low', 'right')}
+        <th class="text-center" style="width: 60px;">จัดการ</th>
+      </tr>
+    `;
+  }
+
+  tableHeader.innerHTML = thHtml;
+}
+
+function renderTableBody(items) {
+  if (items.length === 0) {
+    tableBody.innerHTML = `<tr><td colspan="12" class="text-center" style="padding: 40px; color: var(--text-muted);">ไม่พบข้อมูลสินทรัพย์ที่ตรงกับเงื่อนไขการค้นหา/กรอง</td></tr>`;
+    return;
+  }
+
+  const rows = items.map((asset, idx) => {
+    const symHtml = `
+      <div class="symbol-cell">
+        <a href="${asset.stockanalysis_url}" target="_blank" rel="noopener noreferrer" class="symbol-link" title="เปิดดูบน StockAnalysis.com">
+          ${escapeHtml(asset.symbol)}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+        </a>
+        <span class="badge-type ${getBadgeClass(asset.type)}">${escapeHtml(asset.type || 'STOCK')}</span>
+        <span class="company-name" title="${escapeHtml(asset.name || '')}">${escapeHtml(asset.name || '')}</span>
+      </div>
+    `;
+
+    const priceHtml = `<span class="price-val">${formatPrice(asset.price, asset.currency)}</span>`;
+    const changeHtml = formatChange(asset.change_pct);
+    const deleteBtn = `<button class="btn-row-action" onclick="removeSymbolFromCurrentList('${asset.symbol}')" title="ลบออกจาก Watchlist">&times;</button>`;
+
+    if (activeView === 'overview') {
+      return `
+        <tr>
+          <td class="text-center mono" style="color: var(--text-muted); font-size: 11px;">${idx + 1}</td>
+          <td>${symHtml}</td>
+          <td class="text-right">${priceHtml}</td>
+          <td class="text-right">${changeHtml}</td>
+          <td class="text-right mono">${formatVal(asset.pe)}</td>
+          <td class="text-right mono">${formatPercent(asset.dividend_yield)}</td>
+          <td class="text-right mono" style="color: var(--text-secondary);">${formatVolume(asset.volume)}</td>
+          <td class="text-right mono">${formatPrice(asset.high_52w, asset.currency)}</td>
+          <td class="text-center">${deleteBtn}</td>
+        </tr>
+      `;
+    } else if (activeView === 'technical') {
+      const zoneBadge = getRsiZoneBadge(asset.rsi_daily);
+      return `
+        <tr>
+          <td class="text-center mono" style="color: var(--text-muted); font-size: 11px;">${idx + 1}</td>
+          <td>${symHtml}</td>
+          <td class="text-right">${priceHtml}</td>
+          <td class="text-right">${changeHtml}</td>
+          <td class="text-center">${formatRsiPill(asset.rsi_daily)}</td>
+          <td class="text-center">${formatRsiPill(asset.rsi_weekly)}</td>
+          <td class="text-center">${formatRsiPill(asset.rsi_monthly)}</td>
+          <td class="text-center">${zoneBadge}</td>
+          <td class="text-center">${deleteBtn}</td>
+        </tr>
+      `;
+    } else if (activeView === 'dividends') {
+      return `
+        <tr>
+          <td class="text-center mono" style="color: var(--text-muted); font-size: 11px;">${idx + 1}</td>
+          <td>${symHtml}</td>
+          <td class="text-right">${priceHtml}</td>
+          <td class="text-right">${changeHtml}</td>
+          <td class="text-right mono" style="font-weight: 600; color: var(--green-text);">${formatPercent(asset.dividend_yield)}</td>
+          <td class="text-right mono">${formatVal(asset.pe)}</td>
+          <td class="text-center">${deleteBtn}</td>
+        </tr>
+      `;
+    } else {
+      // All Columns
+      return `
+        <tr>
+          <td class="text-center mono" style="color: var(--text-muted); font-size: 11px;">${idx + 1}</td>
+          <td>${symHtml}</td>
+          <td class="text-right">${priceHtml}</td>
+          <td class="text-right">${changeHtml}</td>
+          <td class="text-right mono">${formatVal(asset.pe)}</td>
+          <td class="text-right mono">${formatPercent(asset.dividend_yield)}</td>
+          <td class="text-center">${formatRsiPill(asset.rsi_daily)}</td>
+          <td class="text-center">${formatRsiPill(asset.rsi_weekly)}</td>
+          <td class="text-center">${formatRsiPill(asset.rsi_monthly)}</td>
+          <td class="text-right mono" style="color: var(--text-secondary);">${formatVolume(asset.volume)}</td>
+          <td class="text-right mono">${formatPrice(asset.high_52w, asset.currency)}</td>
+          <td class="text-right mono">${formatPrice(asset.low_52w, asset.currency)}</td>
+          <td class="text-center">${deleteBtn}</td>
+        </tr>
+      `;
+    }
+  });
+
+  tableBody.innerHTML = rows.join('');
+}
+
+/* ==========================================================================
+   Formatting & Visual Helpers
+   ========================================================================== */
+function formatPrice(val, currency = 'USD') {
+  if (val === null || val === undefined || isNaN(val)) return '-';
+  let symbol = '$';
+  if (currency === 'THB') symbol = '฿';
+  else if (currency === 'HKD') symbol = 'HK$';
+  else if (currency !== 'USD') symbol = currency + ' ';
+
+  const formatted = val >= 1000 ? val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : val.toFixed(2);
+  return `${symbol}${formatted}`;
 }
 
 function formatChange(val) {
-  if (val === null || val === undefined) return '<span class="change-pill zero">-</span>';
+  if (val === null || val === undefined || isNaN(val)) return '<span class="change-pill zero">-</span>';
   const isPos = val > 0;
   const isNeg = val < 0;
   const sign = isPos ? '+' : '';
@@ -90,43 +589,59 @@ function formatChange(val) {
   return `<span class="change-pill ${cls}">${arrow}${sign}${val.toFixed(2)}%</span>`;
 }
 
-function formatPE(val) {
-  if (val === null || val === undefined || isNaN(val)) return '<span class="text-muted">-</span>';
-  return `<span class="mono-num">${val.toFixed(2)}</span>`;
-}
-
-function formatYield(val) {
-  if (val === null || val === undefined || isNaN(val)) return '<span class="text-muted">-</span>';
-  return `<span class="mono-num">${val.toFixed(2)}%</span>`;
-}
-
-function formatRSI(val) {
+function formatRsiPill(val) {
   if (val === null || val === undefined || isNaN(val)) return '<span class="text-muted">-</span>';
   let cls = 'rsi-neutral';
-  if (val < 30) {
-    cls = 'rsi-oversold';
-  } else if (val > 70) {
-    cls = 'rsi-overbought';
-  }
+  if (val < 30) cls = 'rsi-oversold';
+  else if (val > 70) cls = 'rsi-overbought';
   return `<span class="rsi-badge ${cls}">${val.toFixed(1)}</span>`;
 }
 
-function getBadgeHtml(type) {
-  if (type === 'ETF') {
-    return `<span class="badge badge-etf">ETF</span>`;
-  } else if (type === 'CRYPTOCURRENCY') {
-    return `<span class="badge badge-crypto">CRYPTO</span>`;
-  }
-  return `<span class="badge badge-equity">STOCK</span>`;
+function getRsiZoneBadge(val) {
+  if (val === null || val === undefined || isNaN(val)) return '-';
+  if (val < 30) return '<span style="color: var(--purple-text); font-weight: 600; font-size: 11px;">🟢 OVERSOLD</span>';
+  if (val > 70) return '<span style="color: var(--red-text); font-weight: 600; font-size: 11px;">🔴 OVERBOUGHT</span>';
+  return '<span style="color: var(--text-muted); font-size: 11px;">⚪ NEUTRAL</span>';
 }
 
-function getStockAnalysisUrl(symbol, type) {
+function formatVal(val) {
+  if (val === null || val === undefined || isNaN(val)) return '-';
+  return val.toFixed(2);
+}
+
+function formatPercent(val) {
+  if (val === null || val === undefined || isNaN(val)) return '-';
+  return `${val.toFixed(2)}%`;
+}
+
+function formatVolume(val) {
+  if (val === null || val === undefined || isNaN(val)) return '-';
+  if (val >= 1e9) return (val / 1e9).toFixed(2) + 'B';
+  if (val >= 1e6) return (val / 1e6).toFixed(2) + 'M';
+  if (val >= 1e3) return (val / 1e3).toFixed(1) + 'K';
+  return val.toLocaleString();
+}
+
+function getBadgeClass(type) {
+  if (type === 'ETF') return 'badge-etf';
+  if (type === 'CRYPTOCURRENCY') return 'badge-crypto';
+  return 'badge-stock';
+}
+
+function resolveAssetType(sym) {
+  if (sym.includes('-USD') || sym.includes('BTC') || sym.includes('ETH')) return 'CRYPTOCURRENCY';
+  if (['SPYI', 'SCHD', 'VYMI', 'IAUI', 'ACWI', 'QQQ', 'SPY', 'VOO', 'VTI', 'JEPI', 'JEPQ', 'TLT', 'NVDL'].includes(sym)) return 'ETF';
+  return 'STOCK';
+}
+
+function getStockAnalysisUrl(symbol) {
   const sym = symbol.trim();
   if (sym.includes(':')) {
     const parts = sym.split(':');
     return `https://stockanalysis.com/quote/${parts[0].toLowerCase()}/${parts[1].toUpperCase()}/`;
   }
   const cleanSym = symbol.toLowerCase().replace('-usd', '').replace('^', '').trim();
+  const type = resolveAssetType(symbol);
   if (type === 'ETF') {
     return `https://stockanalysis.com/etf/${cleanSym}/`;
   } else if (type === 'CRYPTOCURRENCY') {
@@ -135,639 +650,426 @@ function getStockAnalysisUrl(symbol, type) {
   return `https://stockanalysis.com/stocks/${cleanSym}/`;
 }
 
-function formatThaiDateTime(dateString) {
-  if (!dateString) return '-';
-  if (dateString.includes('เวลา') || dateString.includes('น.')) {
-    return dateString;
-  }
-  try {
-    let iso = dateString;
-    if (dateString.endsWith(' UTC')) {
-      iso = dateString.replace(' UTC', 'Z').replace(' ', 'T');
-    }
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return dateString;
-
-    const datePart = new Intl.DateTimeFormat('th-TH', {
-      timeZone: 'Asia/Bangkok',
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    }).format(d);
-
-    const timePart = new Intl.DateTimeFormat('th-TH', {
-      timeZone: 'Asia/Bangkok',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    }).format(d);
-
-    return `${datePart} เวลา ${timePart} น.`;
-  } catch (e) {
-    return dateString;
-  }
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-let currentIsoTimestamp = '';
-
-// Fetch Master Data
-async function loadData() {
-  try {
-    const res = await fetch('data/stocks.json?t=' + Date.now(), {
-      cache: 'no-store'
-    });
-    if (!res.ok) throw new Error('Cannot load data/stocks.json');
-    const json = await res.json();
-    allStocksData = json.assets || [];
-    currentIsoTimestamp = json.last_updated_iso || '';
-    
-    if (json.last_updated) {
-      lastUpdatedText.textContent = `อัปเดตล่าสุด: ${formatThaiDateTime(json.last_updated)}`;
-    }
-
-    // Initialize Watchlist
-    initWatchlist();
-  } catch (err) {
-    console.warn('Could not load stocks.json directly, falling back:', err);
-    lastUpdatedText.textContent = 'ไม่สามารถโหลดข้อมูลล่าสุดได้';
-    initWatchlist();
-  }
-}
-
-// Initialize Watchlist from LocalStorage or Default
-function initWatchlist() {
-  const saved = localStorage.getItem(STORAGE_KEYS.WATCHLIST);
-  if (saved) {
-    try {
-      userWatchlist = JSON.parse(saved);
-    } catch (e) {
-      userWatchlist = [];
-    }
-  }
-
-  // If no saved watchlist, initialize from loaded data or defaults
-  if (!userWatchlist || userWatchlist.length === 0) {
-    if (allStocksData.length > 0) {
-      userWatchlist = allStocksData.map(a => a.symbol.toUpperCase());
-    } else {
-      userWatchlist = [
-        'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'SCHD', 'BTC-USD', 'TSM',
-        'SPYI', 'VYMI', 'BKK:CPALL', 'BKK:BDMS', 'BKK:GULF', 'IAUI', 'HKG:0700'
-      ];
-    }
-    saveWatchlist();
-  }
-
-  render();
-}
-
-function saveWatchlist() {
-  localStorage.setItem(STORAGE_KEYS.WATCHLIST, JSON.stringify(userWatchlist));
-}
-
-// Add Asset
-function addAsset(rawSymbol) {
-  const symbol = rawSymbol.trim().toUpperCase();
-  if (!symbol) return;
-
-  if (userWatchlist.includes(symbol)) {
-    showToast(`⚠️ ${symbol} อยู่ใน Watchlist แล้ว`);
-    return;
-  }
-
-  userWatchlist.push(symbol);
-  saveWatchlist();
-  newSymbolInput.value = '';
-
-  const existsInData = allStocksData.some(a => a.symbol === symbol);
-  if (existsInData) {
-    showToast(`✅ เพิ่ม ${symbol} เข้าสู่ Watchlist เรียบร้อย`);
+/* ==========================================================================
+   Sorting Logic
+   ========================================================================== */
+function handleSort(column) {
+  if (currentSort.column === column) {
+    currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
   } else {
-    showToast(`✅ เพิ่ม ${symbol} แล้ว! กดปุ่ม 'ซิงก์ GitHub & คำนวณข้อมูล' ด้านบนเพื่อให้ระบบดึงราคาและ RSI`, 6000);
+    currentSort.column = column;
+    currentSort.order = 'asc';
   }
-
-  render();
+  renderTable();
 }
+window.handleSort = handleSort;
 
-// Delete Asset
-function deleteAsset(symbol) {
-  userWatchlist = userWatchlist.filter(s => s !== symbol);
-  saveWatchlist();
-  showToast(`🗑️ ลบ ${symbol} ออกจาก Watchlist แล้ว`);
-  render();
-}
+function sortItems(items) {
+  const { column, order } = currentSort;
+  const mult = order === 'asc' ? 1 : -1;
 
-// Filter and Sort Data
-function getFilteredAndSortedData() {
-  // Combine all items in userWatchlist
-  let items = userWatchlist.map(sym => {
-    const found = allStocksData.find(a => a.symbol === sym);
-    if (found) return found;
-    // Ticker added by user but not yet in stocks.json
-    return {
-      symbol: sym,
-      name: sym,
-      type: sym.includes('-USD') ? 'CRYPTOCURRENCY' : 'EQUITY',
-      price: null,
-      change_pct: null,
-      pe: null,
-      dividend_yield: null,
-      rsi_daily: null,
-      rsi_weekly: null,
-      rsi_monthly: null,
-      stockanalysis_url: getStockAnalysisUrl(sym, sym.includes('-USD') ? 'CRYPTOCURRENCY' : 'EQUITY')
-    };
-  });
-
-  // Category Filter
-  if (currentCategory !== 'ALL') {
-    items = items.filter(item => item.type === currentCategory);
-  }
-
-  // Search Filter
-  if (currentSearch.trim()) {
-    const q = currentSearch.toLowerCase().trim();
-    items = items.filter(item => 
-      item.symbol.toLowerCase().includes(q) || 
-      (item.name && item.name.toLowerCase().includes(q))
-    );
-  }
-
-  // RSI Filter
-  if (currentRsiFilter === 'OVERSOLD') {
-    items = items.filter(item => item.rsi_daily !== null && item.rsi_daily < 30);
-  } else if (currentRsiFilter === 'OVERBOUGHT') {
-    items = items.filter(item => item.rsi_daily !== null && item.rsi_daily > 70);
-  } else if (currentRsiFilter === 'NEUTRAL') {
-    items = items.filter(item => item.rsi_daily !== null && item.rsi_daily >= 30 && item.rsi_daily <= 70);
-  }
-
-  // Sorting
   items.sort((a, b) => {
-    let valA = a[currentSort.column];
-    let valB = b[currentSort.column];
+    let valA = a[column];
+    let valB = b[column];
 
-    if (valA === null || valA === undefined) valA = -999999999;
-    if (valB === null || valB === undefined) valB = -999999999;
+    if (valA === null || valA === undefined) return 1;
+    if (valB === null || valB === undefined) return -1;
 
     if (typeof valA === 'string') {
-      return currentSort.order === 'asc' 
-        ? valA.localeCompare(valB) 
-        : valB.localeCompare(valA);
+      return valA.localeCompare(valB) * mult;
     }
-    return currentSort.order === 'asc' ? valA - valB : valB - valA;
+    return (valA - valB) * mult;
   });
-
-  return items;
 }
 
-// Render Table
-function render() {
-  const items = getFilteredAndSortedData();
+/* ==========================================================================
+   Statistics Summary
+   ========================================================================== */
+function updateSummaryStats(items) {
+  statTotal.textContent = items.length;
 
-  // Update Pending Sync Banner
-  const pendingTickers = userWatchlist.filter(sym => !allStocksData.some(a => a.symbol === sym));
-  if (pendingSyncBanner) {
-    if (pendingTickers.length > 0) {
-      pendingSyncBanner.style.display = 'flex';
-      if (pendingCount) pendingCount.textContent = pendingTickers.length;
-      if (pendingListText) pendingListText.textContent = pendingTickers.join(', ');
-    } else {
-      pendingSyncBanner.style.display = 'none';
+  let gainers = 0;
+  let losers = 0;
+  let oversold = 0;
+  let overbought = 0;
+
+  items.forEach(item => {
+    if (item.change_pct !== null && !isNaN(item.change_pct)) {
+      if (item.change_pct > 0) gainers++;
+      else if (item.change_pct < 0) losers++;
     }
-  }
-  
-  // Update Stats
-  updateStats();
+    if (item.rsi_daily !== null && !isNaN(item.rsi_daily)) {
+      if (item.rsi_daily < 30) oversold++;
+      else if (item.rsi_daily > 70) overbought++;
+    }
+  });
 
-  // Render Table Rows
-  if (items.length === 0) {
-    tableBody.innerHTML = '';
-    emptyState.style.display = 'flex';
+  statGainers.textContent = gainers;
+  statLosers.textContent = losers;
+  statOversold.textContent = oversold;
+  statOverbought.textContent = overbought;
+}
+
+/* ==========================================================================
+   Symbol Search & Autocomplete
+   ========================================================================== */
+async function handleSearchInput(e) {
+  const query = e.target.value.trim();
+  clearTimeout(searchDebounceTimer);
+
+  if (query.length < 1) {
+    searchDropdown.classList.add('hidden');
+    searchDropdown.innerHTML = '';
     return;
   }
 
-  emptyState.style.display = 'none';
-  tableBody.innerHTML = items.map(item => {
-    const url = item.stockanalysis_url || getStockAnalysisUrl(item.symbol, item.type);
-    return `
-      <tr data-symbol="${item.symbol}">
-        <td>
-          <div class="asset-col">
-            <div class="asset-title">
-              <span class="asset-symbol">${item.symbol}</span>
-              ${getBadgeHtml(item.type)}
-            </div>
-            <span class="asset-name" title="${item.name || item.symbol}">${item.name || item.symbol}</span>
-          </div>
-        </td>
-        <td class="text-right mono-num">
-          ${item.price !== null 
-            ? formatPrice(item.price, item.currency) 
-            : `<button class="btn-sync-pill" onclick="handleQuickSync()" title="กดเพื่อสั่งให้ GitHub Actions คำนวณข้อมูล">⏳ รอคำนวณ</button>`
-          }
-        </td>
-        <td class="text-right">${formatChange(item.change_pct)}</td>
-        <td class="text-right">${formatPE(item.pe)}</td>
-        <td class="text-center">${formatRSI(item.rsi_daily)}</td>
-        <td class="text-center">${formatRSI(item.rsi_weekly)}</td>
-        <td class="text-center">${formatRSI(item.rsi_monthly)}</td>
-        <td class="text-right">${formatYield(item.dividend_yield)}</td>
-        <td class="text-center">
-          <a href="${url}" target="_blank" rel="noopener noreferrer" class="link-btn-stockanalysis" title="เปิดหน้า ${item.symbol} บน StockAnalysis.com">
-            <span>ดูข้อมูล</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <line x1="10" y1="14" x2="21" y2="3"></line>
-            </svg>
-          </a>
-        </td>
-        <td class="text-center">
-          <button class="btn-delete" onclick="deleteAsset('${item.symbol}')" title="ลบออกจาก Watchlist">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 6h18"></path>
-              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-            </svg>
-          </button>
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  // Update Sorting Headers
-  document.querySelectorAll('th.sortable').forEach(th => {
-    const col = th.getAttribute('data-sort');
-    th.classList.remove('sorted-asc', 'sorted-desc');
-    if (col === currentSort.column) {
-      th.classList.add(currentSort.order === 'asc' ? 'sorted-asc' : 'sorted-desc');
-    }
-  });
-}
-
-function updateStats() {
-  const trackedItems = userWatchlist.map(sym => allStocksData.find(a => a.symbol === sym)).filter(Boolean);
-  
-  statTotalCount.textContent = userWatchlist.length;
-  countAll.textContent = userWatchlist.length;
-
-  const gainers = trackedItems.filter(i => i.change_pct > 0).length;
-  const losers = trackedItems.filter(i => i.change_pct < 0).length;
-  const oversold = trackedItems.filter(i => i.rsi_daily !== null && i.rsi_daily < 30).length;
-  const overbought = trackedItems.filter(i => i.rsi_daily !== null && i.rsi_daily > 70).length;
-
-  statGainersCount.textContent = gainers;
-  statLosersCount.textContent = losers;
-  statOversoldCount.textContent = oversold;
-  statOverboughtCount.textContent = overbought;
-}
-
-// Event Listeners
-addAssetForm.addEventListener('submit', (e) => {
-  e.preventDefault();
-  addAsset(newSymbolInput.value);
-});
-
-searchInput.addEventListener('input', (e) => {
-  currentSearch = e.target.value;
-  render();
-});
-
-rsiFilter.addEventListener('change', (e) => {
-  currentRsiFilter = e.target.value;
-  render();
-});
-
-// Category Filter Tabs
-document.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentCategory = btn.getAttribute('data-category');
-    render();
-  });
-});
-
-// Sorting Header Clicks
-document.querySelectorAll('th.sortable').forEach(th => {
-  th.addEventListener('click', () => {
-    const col = th.getAttribute('data-sort');
-    if (currentSort.column === col) {
-      currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
-    } else {
-      currentSort.column = col;
-      currentSort.order = col === 'symbol' ? 'asc' : 'desc';
-    }
-    render();
-  });
-});
-
-// Modal Operations
-btnOpenSync.addEventListener('click', () => {
-  watchlistTextarea.value = JSON.stringify(userWatchlist, null, 2);
-  const savedToken = localStorage.getItem(STORAGE_KEYS.GITHUB_PAT) || '';
-  githubTokenInput.value = savedToken;
-  syncStatus.textContent = '';
-  syncModal.style.display = 'flex';
-});
-
-btnCloseSync.addEventListener('click', () => {
-  syncModal.style.display = 'none';
-});
-
-btnDoneSync.addEventListener('click', () => {
-  syncModal.style.display = 'none';
-});
-
-syncModal.addEventListener('click', (e) => {
-  if (e.target === syncModal) {
-    syncModal.style.display = 'none';
-  }
-});
-
-btnApplyJson.addEventListener('click', () => {
-  try {
-    const parsed = JSON.parse(watchlistTextarea.value);
-    if (!Array.isArray(parsed)) throw new Error('ต้องเป็น JSON Array ของ Symbol');
-    userWatchlist = parsed.map(s => String(s).trim().toUpperCase()).filter(Boolean);
-    saveWatchlist();
-    render();
-    showToast('✅ บันทึกรายการ Watchlist ลงในเบราว์เซอร์เรียบร้อย');
-  } catch (err) {
-    alert('รูปแบบ JSON ไม่ถูกต้อง: ' + err.message);
-  }
-});
-
-btnCopyJson.addEventListener('click', () => {
-  navigator.clipboard.writeText(watchlistTextarea.value).then(() => {
-    showToast('📋 คัดลอก JSON ไปยังคลิปบอร์ดแล้ว');
-  });
-});
-
-btnDownloadJson.addEventListener('click', () => {
-  const blob = new Blob([watchlistTextarea.value], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'watchlist.json';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('💾 ดาวน์โหลดไฟล์ watchlist.json เรียบร้อย');
-});
-
-btnResetWatchlist.addEventListener('click', () => {
-  if (confirm('คุณต้องการรีเซ็ต Watchlist เป็นค่าเริ่มต้นทั้งหมดใช่หรือไม่?')) {
-    localStorage.removeItem(STORAGE_KEYS.WATCHLIST);
-    initWatchlist();
-    watchlistTextarea.value = JSON.stringify(userWatchlist, null, 2);
-    showToast('🔄 รีเซ็ต Watchlist เป็นค่าเริ่มต้นแล้ว');
-  }
-});
-
-// Quick Sync Action
-async function handleQuickSync() {
-  const token = localStorage.getItem(STORAGE_KEYS.GITHUB_PAT) || '';
-  if (!token) {
-    btnOpenSync.click();
-    showToast('กรุณากรอก GitHub Token ในช่องด้านล่าง แล้วกดซิงก์ข้อมูล', 5000);
-    return;
-  }
-
-  if (btnQuickSync) btnQuickSync.innerHTML = '<span>⏳ กำลังบันทึกและสั่งรัน GitHub Actions...</span>';
-  showToast('⏳ กำลังส่งข้อมูลไปยัง GitHub เพื่อเริ่มคำนวณ...', 4000);
-
-  try {
-    const getRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github.v3+json'
-      }
-    });
-    let sha = null;
-    if (getRes.ok) {
-      const getData = await getRes.json();
-      sha = getData.sha;
-    }
-
-    const contentBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(userWatchlist, null, 2) + '\n')));
-    const putRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: 'Update watchlist.json from web UI',
-        content: contentBase64,
-        sha: sha
-      })
-    });
-
-    if (!putRes.ok) {
-      const err = await putRes.json();
-      throw new Error(`บันทึกไฟล์ไม่สำเร็จ: ${err.message}`);
-    }
-
-    const dispatchRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/update_data.yml/dispatches`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ ref: 'main' })
-    });
-
-    if (!dispatchRes.ok && dispatchRes.status !== 204) {
-      const err = await dispatchRes.json();
-      throw new Error(`สั่งรัน Workflow ไม่สำเร็จ: ${err.message}`);
-    }
-
-    if (btnQuickSync) btnQuickSync.innerHTML = '<span>✅ เริ่มคำนวณแล้ว (รอ 1-2 นาที ข้อมูลจะแสดง)</span>';
-    showToast('🚀 สั่งรัน GitHub Actions สำเร็จแล้ว! ระบบจะดึงราคาและคำนวณ RSI ในอีก 1-2 นาที', 6000);
-    
-    // Auto reload data
-    setTimeout(loadData, 45000);
-    setTimeout(loadData, 75000);
-    setTimeout(loadData, 105000);
-  } catch (err) {
-    console.error(err);
-    alert(`ข้อผิดพลาด: ${err.message}`);
-    if (btnQuickSync) btnQuickSync.innerHTML = '<span>❌ ไม่สำเร็จ (คลิกเพื่อลองใหม่)</span>';
-  }
-}
-window.handleQuickSync = handleQuickSync;
-
-if (btnQuickSync) {
-  btnQuickSync.addEventListener('click', handleQuickSync);
-}
-
-// GitHub API Direct Sync Modal
-btnSyncToGitHub.addEventListener('click', async () => {
-  const token = githubTokenInput.value.trim();
-  if (!token) {
-    alert('กรุณากรอก GitHub Personal Access Token (PAT) ที่มีสิทธิ์ repo เพื่อซิงก์ข้อมูล');
-    return;
-  }
-
-  localStorage.setItem(STORAGE_KEYS.GITHUB_PAT, token);
-  syncStatus.textContent = 'กำลังติดต่อ GitHub API...';
-
-  try {
-    const getRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github.v3+json'
-      }
-    });
-
-    let sha = null;
-    if (getRes.ok) {
-      const getData = await getRes.json();
-      sha = getData.sha;
-    }
-
-    syncStatus.textContent = 'กำลังบันทึก data/watchlist.json ไปยัง Repository...';
-    const contentBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(userWatchlist, null, 2) + '\n')));
-    
-    const putRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: 'Update watchlist.json from web UI',
-        content: contentBase64,
-        sha: sha
-      })
-    });
-
-    if (!putRes.ok) {
-      const err = await putRes.json();
-      throw new Error(`บันทึกไฟล์ไม่สำเร็จ: ${err.message}`);
-    }
-
-    syncStatus.textContent = 'กำลังสั่งรัน GitHub Actions Workflow...';
-    const dispatchRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/update_data.yml/dispatches`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        ref: 'main'
-      })
-    });
-
-    if (!dispatchRes.ok && dispatchRes.status !== 204) {
-      const err = await dispatchRes.json();
-      throw new Error(`สั่งรัน Workflow ไม่สำเร็จ: ${err.message}`);
-    }
-
-    syncStatus.textContent = '✅ ซิงก์และสั่งรัน Workflow สำเร็จ! ข้อมูลจะอัปเดตใน 1-2 นาที';
-    showToast('🚀 ส่งคำสั่งอัปเดตไปยัง GitHub เรียบร้อยแล้ว');
-    
-    setTimeout(loadData, 45000);
-    setTimeout(loadData, 75000);
-  } catch (err) {
-    console.error(err);
-    syncStatus.textContent = `❌ เกิดข้อผิดพลาด: ${err.message}`;
-    alert(`ข้อผิดพลาดในการซิงก์: ${err.message}\n\nตรวจสอบ Token หรือใช้ปุ่ม 'คัดลอก JSON' ไปวางใน GitHub แทนได้ครับ`);
-  }
-});
-
-// Force Refresh Market Data
-if (btnRefreshMarket) {
-  btnRefreshMarket.addEventListener('click', async () => {
-    const token = localStorage.getItem(STORAGE_KEYS.GITHUB_PAT);
-    if (!token) {
-      if (typeof openSyncModal === 'function') {
-        openSyncModal();
-      } else {
-        watchlistTextarea.value = JSON.stringify(userWatchlist, null, 2);
-        githubTokenInput.value = '';
-        syncModal.style.display = 'flex';
-      }
-      showToast('⚠️ กรุณากรอก GitHub Token ในช่องด้านล่าง แล้วกดซิงก์ (เพื่ออนุญาตให้สั่งอัปเดตข้อมูลได้ครับ)', 6000);
-      return;
-    }
-
-    const icon = btnRefreshMarket.querySelector('svg');
-    if (icon) icon.classList.add('spin-anim');
-    if (btnRefreshText) btnRefreshText.textContent = 'กำลังส่งคำสั่ง...';
-    btnRefreshMarket.disabled = true;
-
+  searchDebounceTimer = setTimeout(async () => {
     try {
-      const dispatchRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/update_data.yml/dispatches`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ ref: 'main' })
-      });
-
-      if (!dispatchRes.ok && dispatchRes.status !== 204) {
-        const err = await dispatchRes.json().catch(() => ({}));
-        throw new Error(err.message || `HTTP ${dispatchRes.status}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const data = await res.json();
+        renderSearchDropdown(data.results || [], query);
+        return;
       }
-
-      if (btnRefreshText) btnRefreshText.textContent = 'กำลังคำนวณราคา... (~30 วิ)';
-      showToast('🚀 ส่งคำสั่งสำเร็จ! ระบบกำลังดึงราคาและคำนวณ RSI ใน GitHub Actions (ใช้เวลา ~30 วินาที)', 7000);
-
-      const startIso = currentIsoTimestamp;
-      let attempts = 0;
-      const pollTimer = setInterval(async () => {
-        attempts++;
-        try {
-          const pollRes = await fetch('data/stocks.json?t=' + Date.now(), { cache: 'no-store' });
-          if (pollRes.ok) {
-            const pollData = await pollRes.json();
-            if (pollData.last_updated_iso && pollData.last_updated_iso !== startIso) {
-              clearInterval(pollTimer);
-              allStocksData = pollData.assets || [];
-              currentIsoTimestamp = pollData.last_updated_iso;
-              if (pollData.last_updated) {
-                lastUpdatedText.textContent = `อัปเดตล่าสุด: ${formatThaiDateTime(pollData.last_updated)}`;
-              }
-              render();
-              if (icon) icon.classList.remove('spin-anim');
-              if (btnRefreshText) btnRefreshText.textContent = 'อัปเดตราคาล่าสุด';
-              btnRefreshMarket.disabled = false;
-              showToast('🎉 ข้อมูลราคาและ RSI อัปเดตล่าสุดเรียบร้อยแล้ว!', 5000);
-              return;
-            }
-          }
-        } catch (e) {
-          console.warn('Poll error:', e);
-        }
-
-        if (attempts >= 18) { // timeout after 90s
-          clearInterval(pollTimer);
-          if (icon) icon.classList.remove('spin-anim');
-          if (btnRefreshText) btnRefreshText.textContent = 'อัปเดตราคาล่าสุด';
-          btnRefreshMarket.disabled = false;
-          loadData();
-          showToast('ℹ️ กระบวนการทำงานบน GitHub กำลังเสร็จสิ้น หากยังไม่เปลี่ยนให้ลองกดรีเฟรชอีกครั้งในอีกสักครู่ครับ', 6000);
-        }
-      }, 5000);
-
     } catch (err) {
-      console.error('Trigger update error:', err);
-      alert(`สั่งอัปเดตไม่สำเร็จ: ${err.message}`);
-      if (icon) icon.classList.remove('spin-anim');
-      if (btnRefreshText) btnRefreshText.textContent = 'อัปเดตราคาล่าสุด';
-      btnRefreshMarket.disabled = false;
+      console.warn('Search API failed, fallback to local search:', err);
+    }
+    // Fallback search
+    renderSearchDropdown([
+      { symbol: query.toUpperCase(), name: `เพิ่ม ${query.toUpperCase()}`, type: 'STOCK' }
+    ], query);
+  }, 200);
+}
+
+function renderSearchDropdown(results, rawQuery) {
+  if (results.length === 0) {
+    searchDropdown.innerHTML = `
+      <div class="search-dropdown-item" onclick="addSymbolToCurrentList('${rawQuery.toUpperCase()}')">
+        <div class="dropdown-item-left">
+          <div class="dropdown-symbol-row">
+            <span class="dropdown-symbol">${escapeHtml(rawQuery.toUpperCase())}</span>
+            <span class="dropdown-badge">CUSTOM</span>
+          </div>
+          <span class="dropdown-name">กดเพื่อเพิ่ม "${escapeHtml(rawQuery.toUpperCase())}" เข้าสู่ Watchlist</span>
+        </div>
+        <span class="dropdown-action-hint">+ เพิ่ม</span>
+      </div>
+    `;
+    searchDropdown.classList.remove('hidden');
+    return;
+  }
+
+  const itemsHtml = results.map(item => `
+    <div class="search-dropdown-item" onclick="addSymbolToCurrentList('${item.symbol}')">
+      <div class="dropdown-item-left">
+        <div class="dropdown-symbol-row">
+          <span class="dropdown-symbol">${escapeHtml(item.symbol)}</span>
+          <span class="dropdown-badge">${escapeHtml(item.type || 'STOCK')}</span>
+        </div>
+        <span class="dropdown-name">${escapeHtml(item.name || item.symbol)}</span>
+      </div>
+      <span class="dropdown-action-hint">+ เพิ่ม</span>
+    </div>
+  `).join('');
+
+  searchDropdown.innerHTML = itemsHtml;
+  searchDropdown.classList.remove('hidden');
+}
+
+function addSymbolToCurrentList(symbol) {
+  const sym = symbol.trim().toUpperCase();
+  if (!sym) return;
+
+  const currentList = getActiveWatchlist();
+  if (currentList.symbols.includes(sym)) {
+    showToast(`⚠️ ${sym} อยู่ใน Watchlist แล้ว`);
+    searchDropdown.classList.add('hidden');
+    globalSearchInput.value = '';
+    return;
+  }
+
+  currentList.symbols.push(sym);
+  saveWatchlists();
+  renderWatchlistTabs();
+  renderTable();
+
+  searchDropdown.classList.add('hidden');
+  globalSearchInput.value = '';
+  showToast(`✅ เพิ่ม ${sym} เข้าสู่ "${currentList.name}" แล้ว`);
+
+  // Fetch data for the new symbol
+  fetchActiveListMarketData();
+}
+window.addSymbolToCurrentList = addSymbolToCurrentList;
+
+function removeSymbolFromCurrentList(symbol) {
+  const currentList = getActiveWatchlist();
+  currentList.symbols = currentList.symbols.filter(s => s !== symbol);
+  saveWatchlists();
+  renderWatchlistTabs();
+  renderTable();
+  showToast(`🗑️ ลบ ${symbol} ออกจาก Watchlist แล้ว`);
+}
+window.removeSymbolFromCurrentList = removeSymbolFromCurrentList;
+
+/* ==========================================================================
+   Event Listeners & Interactions
+   ========================================================================== */
+function setupEventListeners() {
+  // Theme Toggle
+  btnThemeToggle.addEventListener('click', toggleTheme);
+
+  // Refresh Button
+  btnRefresh.addEventListener('click', () => {
+    fetchActiveListMarketData(true);
+  });
+
+  // Search Input & Autocomplete
+  globalSearchInput.addEventListener('input', handleSearchInput);
+  globalSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const val = globalSearchInput.value.trim().toUpperCase();
+      if (val) addSymbolToCurrentList(val);
+    }
+  });
+
+  // Close search dropdown on click outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-autocomplete-wrapper')) {
+      searchDropdown.classList.add('hidden');
+    }
+    if (!e.target.closest('.watchlist-dropdown-wrapper')) {
+      listMenuDropdown.classList.add('hidden');
+    }
+  });
+
+  // Watchlist Actions
+  btnNewWatchlist.addEventListener('click', () => {
+    const name = prompt('กรุณาตั้งชื่อ Watchlist ใหม่:');
+    if (name) createNewWatchlist(name);
+  });
+
+  btnListMenu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    listMenuDropdown.classList.toggle('hidden');
+  });
+
+  menuRenameList.addEventListener('click', () => {
+    listMenuDropdown.classList.add('hidden');
+    const current = getActiveWatchlist();
+    renameInput.value = current.name;
+    renameModal.classList.remove('hidden');
+    renameInput.focus();
+  });
+
+  menuDuplicateList.addEventListener('click', () => {
+    listMenuDropdown.classList.add('hidden');
+    duplicateCurrentWatchlist();
+  });
+
+  menuDeleteList.addEventListener('click', () => {
+    listMenuDropdown.classList.add('hidden');
+    deleteCurrentWatchlist();
+  });
+
+  // Rename Modal
+  btnCloseRename.addEventListener('click', () => renameModal.classList.add('hidden'));
+  btnCancelRename.addEventListener('click', () => renameModal.classList.add('hidden'));
+  btnConfirmRename.addEventListener('click', () => {
+    const val = renameInput.value.trim();
+    if (val) {
+      const current = getActiveWatchlist();
+      current.name = val;
+      saveWatchlists();
+      renderWatchlistTabs();
+      renameModal.classList.add('hidden');
+      showToast(`✏️ เปลี่ยนชื่อเป็น "${val}" เรียบร้อย`);
+    }
+  });
+
+  // View Switcher Buttons
+  viewSwitcher.querySelectorAll('.view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeView = btn.dataset.view;
+      localStorage.setItem(STORAGE_KEYS.VIEW_MODE, activeView);
+      updateViewSwitcherButtons();
+      renderTable();
+    });
+  });
+
+  // Category Pills
+  categoryPills.querySelectorAll('.pill-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      categoryPills.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeCategory = btn.dataset.cat;
+      renderTable();
+    });
+  });
+
+  // RSI Filter
+  rsiZoneFilter.addEventListener('change', (e) => {
+    activeRsiFilter = e.target.value;
+    renderTable();
+  });
+
+  // Table Filter Input
+  tableFilterInput.addEventListener('input', (e) => {
+    tableSearchQuery = e.target.value.trim();
+    renderTable();
+  });
+
+  // Seed default button in empty state
+  btnSeedDefault.addEventListener('click', () => {
+    const current = getActiveWatchlist();
+    current.symbols = [
+      'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'SCHD', 'BTC-USD', 'TSM',
+      'SPYI', 'VYMI', 'BKK:CPALL', 'BKK:BDMS', 'BKK:GULF', 'IAUI'
+    ];
+    saveWatchlists();
+    renderWatchlistTabs();
+    fetchActiveListMarketData(true);
+  });
+
+  // Settings Modal
+  btnOpenSettings.addEventListener('click', openSettingsModal);
+  btnCloseSettings.addEventListener('click', closeSettingsModal);
+  btnDoneSettings.addEventListener('click', closeSettingsModal);
+
+  btnCopyModalJson.addEventListener('click', () => {
+    navigator.clipboard.writeText(modalWatchlistJson.value);
+    showToast('📋 คัดลอก JSON เรียบร้อยแล้ว');
+  });
+
+  btnApplyModalJson.addEventListener('click', () => {
+    try {
+      const parsed = JSON.parse(modalWatchlistJson.value);
+      if (Array.isArray(parsed)) {
+        const current = getActiveWatchlist();
+        current.symbols = parsed.map(s => String(s).trim().toUpperCase()).filter(Boolean);
+        saveWatchlists();
+        renderWatchlistTabs();
+        renderTable();
+        fetchActiveListMarketData(true);
+        showToast('✅ บันทึกรายการ Symbol สำเร็จ');
+      } else {
+        alert('รูปแบบ JSON ต้องเป็น Array เช่น ["NVDA", "MSFT"]');
+      }
+    } catch (err) {
+      alert(`รูปแบบ JSON ไม่ถูกต้อง: ${err.message}`);
+    }
+  });
+
+  btnSavePat.addEventListener('click', () => {
+    const pat = modalGithubPat.value.trim();
+    localStorage.setItem(STORAGE_KEYS.GITHUB_PAT, pat);
+    showToast('🔑 บันทึก GitHub Token ลงในเครื่องเรียบร้อย');
+  });
+
+  btnSyncToGithub.addEventListener('click', handleSyncToGithub);
+
+  btnResetToDefaults.addEventListener('click', () => {
+    if (confirm('คุณต้องการรีเซ็ต Watchlist ทั้งหมดกลับเป็นค่าเริ่มต้นหรือไม่?')) {
+      appWatchlists = JSON.parse(JSON.stringify(DEFAULT_WATCHLISTS));
+      activeListId = 'main';
+      saveWatchlists();
+      renderWatchlistTabs();
+      renderTable();
+      fetchActiveListMarketData(true);
+      closeSettingsModal();
+      showToast('🔄 รีเซ็ตเป็นค่าเริ่มต้นเรียบร้อยแล้ว');
     }
   });
 }
 
-// Load on start
-loadData();
+function openSettingsModal() {
+  const current = getActiveWatchlist();
+  modalWatchlistJson.value = JSON.stringify(current.symbols, null, 2);
+  modalGithubPat.value = localStorage.getItem(STORAGE_KEYS.GITHUB_PAT) || '';
+  githubSyncStatus.textContent = '';
+  settingsModal.classList.remove('hidden');
+}
+
+function closeSettingsModal() {
+  settingsModal.classList.add('hidden');
+}
+
+/* ==========================================================================
+   GitHub Repository Direct Sync
+   ========================================================================== */
+async function handleSyncToGithub() {
+  const token = modalGithubPat.value.trim();
+  if (!token) {
+    alert('กรุณากรอก GitHub Token ก่อนกดซิงก์');
+    return;
+  }
+  localStorage.setItem(STORAGE_KEYS.GITHUB_PAT, token);
+  githubSyncStatus.textContent = '⏳ กำลังติดต่อ GitHub API...';
+
+  const current = getActiveWatchlist();
+
+  try {
+    // 1. Get current SHA of data/watchlist.json
+    const getRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+
+    let sha = null;
+    if (getRes.ok) {
+      const getData = await getRes.json();
+      sha = getData.sha;
+    }
+
+    githubSyncStatus.textContent = '⏳ กำลังบันทึก data/watchlist.json ไปยัง Repository...';
+    const contentBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(current.symbols, null, 2) + '\n')));
+
+    const putRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/data/watchlist.json`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: `Update watchlist.json (${current.name}) from Watchvest UI`,
+        content: contentBase64,
+        sha: sha
+      })
+    });
+
+    if (!putRes.ok) {
+      const err = await putRes.json();
+      throw new Error(err.message || 'PUT failed');
+    }
+
+    githubSyncStatus.textContent = '✅ ซิงก์ข้อมูลไปยัง GitHub Repository สำเร็จเรียบร้อย!';
+    showToast('🚀 ซิงก์ข้อมูลเข้าสู่ GitHub เรียบร้อยแล้ว');
+  } catch (err) {
+    console.error('GitHub Sync Error:', err);
+    githubSyncStatus.textContent = `❌ ข้อผิดพลาด: ${err.message}`;
+    alert(`การซิงก์ล้มเหลว: ${err.message}`);
+  }
+}
+
+/* ==========================================================================
+   Toast Notification
+   ========================================================================== */
+function showToast(message, duration = 3500) {
+  toast.textContent = message;
+  toast.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, duration);
+}
+
+// Start application
+window.addEventListener('DOMContentLoaded', initApp);

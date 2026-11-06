@@ -8,3 +8,6 @@ venv/
 .vscode/
 Thumbs.db
 .DS_Store
+
+rea-main/
+rea-main.zip

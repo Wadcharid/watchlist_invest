@@ -1,112 +1,55 @@
-# 📈 Personal Investment Watchlist (เชื่อมโยง StockAnalysis.com)
+# ⚡ Watchvest (StockAnalysis Pro Watchlist)
 
-ระบบส่วนตัวสำหรับติดตามและตรวจสอบข้อมูลการลงทุน หุ้นสหรัฐฯ (Stocks), กองทุนรวมดัชนี (ETFs) และสินทรัพย์ดิจิทัล (Crypto) พร้อมการคำนวณดัชนีทางเทคนิคหลายกรอบเวลา (Multi-timeframe RSI) และเชื่อมโยงไปยัง [StockAnalysis.com](https://stockanalysis.com/) โดยตรง
+ระบบติดตามและวิเคราะห์ข้อมูลสินทรัพย์การลงทุน ออกแบบและถอดแบบการทำงานเลียนแบบ [StockAnalysis.com/watchlist/](https://stockanalysis.com/watchlist/) อย่างเต็มรูปแบบ รองรับหุ้นสหรัฐฯ (US Stocks), กองทุนรวม ETF, หุ้นไทย (SET BKK), หุ้นฮ่องกง (HKEX) และคริปโทเคอร์เรนซี (Crypto) พร้อมการคำนวณดัชนีทางเทคนิค Multi-Timeframe RSI (Daily, Weekly, Monthly) ตามมาตรฐาน TradingView
 
-🌐 **เว็บไซต์เปิดใช้งาน (GitHub Pages):** [https://wadcharid.github.io/watchlist_invest/](https://wadcharid.github.io/watchlist_invest/)
+🌐 **Repository:** [https://github.com/Wadcharid/watchvest](https://github.com/Wadcharid/watchvest)  
+🚀 **GitHub Pages URL:** [https://wadcharid.github.io/watchvest/](https://wadcharid.github.io/watchvest/)  
+☁️ **Cloudflare Pages:** รองรับ Edge Serverless Functions ในโฟลเดอร์ `functions/api/` เพื่อการดึงข้อมูลสดทันทีแบบ Real-Time ไม่มีปัญหา CORS
 
 ---
 
 ## ✨ ฟีเจอร์หลัก (Key Features)
 
-1. **Watchlist จัดการได้ยืดหยุ่น (Add/Remove Assets):**
-   - สามารถพิมพ์เพิ่ม Ticker หรือกดลบสินทรัพย์ที่ต้องการได้ทันทีจากหน้าเว็บ
-   - บันทึกการตั้งค่าใน `localStorage` ของเบราว์เซอร์อัตโนมัติ
-   - มีระบบซิงก์ข้อมูลกลับไปยัง `data/watchlist.json` บน GitHub หรือคัดลอก JSON เพื่อนำไปอัปเดตได้ในคลิกเดียว
+1. **ถอดแบบหน้าตาและการทำงานสไตล์ StockAnalysis.com:**
+   * **Multiple Watchlists (รองรับหลายพอร์ตพร้อมกัน):** สลับดูระหว่าง "พอร์ตหลัก", "หุ้นเติบโต", "หุ้น & กองทุนปันผล" หรือกดปุ่ม `+ สร้าง List ใหม่`, เปลี่ยนชื่อ, คัดลอก, และลบได้ตามต้องการ
+   * **StockAnalysis Views Switcher:** สลับมุมมองตารางข้อมูลได้ 4 โหมด:
+     * 📊 **Overview:** ราคาล่าสุด, % เปลี่ยนแปลง 24h, P/E Ratio, Dividend Yield, Volume, 52-Week High
+     * 📈 **Technical (RSI):** Daily RSI (14), Weekly RSI (14), Monthly RSI (14), ป้ายสถานะโซน RSI (Oversold / Neutral / Overbought)
+     * 💰 **Dividends:** เน้นดูอัตราเงินปันผลตอบแทน (TTM Cash Distribution Yield), P/E Ratio
+     * 🌐 **All Columns:** รวมทุกคอลัมน์สำคัญไว้ในตารางกว้างแบบเลื่อนได้ (พร้อมตรึงคอลัมน์ Symbol ไว้)
+   * **Instant Search & Autocomplete:** ค้นหาและพิมพ์ชื่อหุ้นเพื่อเพิ่มเข้า Watchlist ได้ทันที พร้อมระบบแนะนำอัตโนมัติ
 
-2. **แสดงข้อมูลสำคัญครบถ้วนในรูปแบบตาราง:**
-   - **ราคาล่าสุด (Latest Price):** อัปเดตราคาตลาดล่าสุด
-   - **% Change (การเปลี่ยนแปลง 24 ชม.):** พร้อมสีแยกสถานะชัดเจน (เขียว/แดง)
-   - **P/E Ratio:** อัตราส่วนราคาต่อกำไร
-   - **Daily RSI (14):** Relative Strength Index กรอบเวลารายวัน (14 วัน)
-   - **Weekly RSI (14):** RSI กรอบเวลารายสัปดาห์ (14 สัปดาห์)
-   - **Monthly RSI (14):** RSI กรอบเวลารายเดือน (14 เดือน)
-   - **% Dividend Yield:** อัตราเงินปันผลตอบแทน
+2. **ระบบดึงข้อมูล Real-time ผ่าน Cloudflare Pages Functions (`functions/api/`):**
+   * `/api/search?q={query}`: ค้นหาหุ้น กองทุน และสินทรัพย์การลงทุน
+   * `/api/quote?symbols={symbols}`: ดึงราคาแบบสดใหม่, คำนวณ Wilder's 14 RSI (Daily, Weekly, Monthly) และ TTM Dividend Yield จาก Edge แบบ Real-Time ไม่มีติด CORS
+   * **ระบบสำรอง (Fallback):** สามารถโหลดข้อมูลจาก `data/stocks.json` ได้อัตโนมัติหากรันในสภาพแวดล้อม Static ทั่วไป
 
-3. **ระบบแจ้งเตือนระดับ RSI (Heatmap Indicator):**
-   - 🟢 **Oversold (RSI < 30):** โซนขายมากเกินไป / มีโอกาสเกิดการรีบาวด์
-   - ⚪ **Neutral (RSI 30 - 70):** โซนราคาปกติ
-   - 🔴 **Overbought (RSI > 70):** โซนซื้อมากเกินไป / ระวังแรงขายทำกำไร
+3. **มาตรฐานการคำนวณที่แม่นยำ:**
+   * **Wilder's RSI (14 งวด):** อ้างอิงราคาปิดจริงในตลาด (Split-Adjusted Only) ตรงตามมาตรฐาน TradingView และ StockAnalysis (แก้ปัญหาภาพลวงตา RSI พุ่งสูงในกองทุนปันผลสูง เช่น SPYI, IAUI)
+   * **TTM Dividend Yield:** คำนวณจากเงินปันผลสดจริงที่จ่ายในรอบ 12 เดือนย้อนหลัง หารด้วยราคาตลาดปัจจุบัน
+   * **แสดงวันและเวลาไทย:** แสดงผลเวลาในรูปแบบ `ICT UTC+7` ของประเทศไทย
 
-4. **เชื่อมโยง StockAnalysis.com:**
-   - ทุกลำดับสินทรัพย์มีปุ่มกดเปิดไปยังหน้าข้อมูลเชิงลึกบน [StockAnalysis.com](https://stockanalysis.com/) โดยตรง เช่น:
-     - หุ้น: `https://stockanalysis.com/stocks/{symbol}/`
-     - กองทุน (ETF): `https://stockanalysis.com/etf/{symbol}/`
-     - คริปโต: ค้นหาหรือเปิดหน้า ETF ที่เกี่ยวข้อง
-
-5. **ระบบคำนวณและอัปเดตข้อมูลอัตโนมัติ (Automated by GitHub Actions):**
-   - GitHub Actions รันอัปเดตข้อมูลทุกวันทำการตลาดสหรัฐฯ (จันทร์ - ศุกร์) เวลา 22:00 UTC (หลังตลาดปิด)
-   - สามารถกดปุ่ม **Run workflow** ด้วยตนเองได้ตลอดเวลาผ่าน GitHub Actions หรือสั่งงานผ่านหน้าเว็บ
+4. **การปรับแต่งและสไตล์ (UI/UX):**
+   * รองรับทั้ง **🌙 Dark Mode** (เนวี่บลูเข้มสไตล์ StockAnalysis) และ **☀️ Light Mode**
+   * มีสรุปตัวเลขสถิติ (Total Assets, Gainers, Losers, RSI Oversold, RSI Overbought)
+   * มีปุ่มลบสินทรัพย์ออกจากพอร์ต และปุ่มเปิดหน้ารายละเอียดบน [StockAnalysis.com](https://stockanalysis.com/) โดยตรง
 
 ---
 
-## 🚀 วิธีตั้งค่าเปิดใช้งาน GitHub Pages
+## ☁️ วิธีเชื่อมต่อเข้ากับ Cloudflare Pages (แนะนำ)
 
-เมื่อนำโค้ดขึ้น GitHub Repository [Wadcharid/watchlist_invest](https://github.com/Wadcharid/watchlist_invest) แล้ว ให้เปิดใช้งานหน้าเว็บดังนี้:
-
-1. ไปที่ **Settings** ของ Repository บน GitHub
-2. เลือกเมนู **Pages** ที่แถบเมนูด้านซ้าย
-3. ในส่วน **Build and deployment**:
-   - Source: เลือก **Deploy from a branch**
-   - Branch: เลือก **main** และโฟลเดอร์ **/ (root)**
-4. กด **Save**
-5. รอประมาณ 1-2 นาที คุณจะได้ URL หน้าเว็บที่เข้าถึงได้ทุกที่ เช่น `https://wadcharid.github.io/watchlist_invest/`
-
----
-
-## ⚙️ วิธีให้สิทธิ์ GitHub Actions อัปเดตไฟล์อัตโนมัติ
-
-เพื่อให้ GitHub Actions สามารถเขียนไฟล์ `data/stocks.json` กลับมาที่ Repository ได้:
-
-1. ไปที่ **Settings** > **Actions** > **General**
-2. เลื่อนลงมาที่หัวข้อ **Workflow permissions**
-3. เลือก **Read and write permissions**
-4. กด **Save**
+1. เข้าสู่แดชบอร์ดของ [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. ไปที่เมนู **Workers & Pages** > กด **Create Application** > เลือกแท็บ **Pages**
+3. เลือก **Connect to Git** แล้วเลือก Repository: `Wadcharid/watchvest`
+4. ตั้งค่า Build:
+   * **Framework preset:** None
+   * **Build command:** *(เว้นว่างไว้)*
+   * **Build output directory:** `/` *(หรือ root)*
+5. กด **Save and Deploy**
+6. เว็บไซต์ของคุณจะออนไลน์ทันทีที่โดเมน Cloudflare Pages (เช่น `https://watchvest.pages.dev/`) พร้อมใช้งาน Edge API `/api/quote` สดใหม่ตลอดเวลา
 
 ---
 
-## 💻 วิธีการรันและทดสอบในเครื่องคอมพิวเตอร์ (Local Development)
+## 🤖 ระบบสำรอง GitHub Actions (อัปเดตอัตโนมัติ)
 
-### 1. ติดตั้ง Library ที่จำเป็น:
-```bash
-pip install -r requirements.txt
-```
-
-### 2. สั่งดึงข้อมูลและคำนวณ RSI:
-```bash
-python scripts/fetch_data.py
-```
-ผลลัพธ์จะถูกบันทึกลงในไฟล์ `data/stocks.json`
-
-### 3. เปิดหน้า Dashboard ในเบราว์เซอร์:
-สามารถเปิดไฟล์ `index.html` ในเบราว์เซอร์ได้ทันที หรือรัน Local Server:
-```bash
-python -m http.server 8080
-```
-แล้วเปิดเบราว์เซอร์ไปที่ `http://localhost:8080`
-
----
-
-## 📁 โครงสร้างโปรเจกต์ (Project Structure)
-
-```
-watchlist_invest/
-├── .github/
-│   └── workflows/
-│       └── update_data.yml      # GitHub Actions รันคำนวณข้อมูลอัตโนมัติ
-├── data/
-│   ├── watchlist.json           # รายชื่อ Symbol ที่ต้องการติดตาม
-│   └── stocks.json              # ข้อมูลราคา, RSI และตัวชี้วัดที่คำนวณแล้ว
-├── scripts/
-│   └── fetch_data.py            # สคริปต์ Python คำนวณ RSI รายวัน/สัปดาห์/เดือน
-├── index.html                   # หน้าเว็บ Dashboard แสดงผลตาราง
-├── app.js                       # Logic ค้นหา, เรียงลำดับ, กรอง, เพิ่ม/ลบ, ซิงก์ GitHub
-├── style.css                    # การออกแบบสไตล์โมเดิร์น Dark Theme
-├── requirements.txt             # รายชื่อไลบรารี Python (yfinance, pandas)
-└── README.md                    # เอกสารคู่มือการใช้งาน
-```
-
----
-
-## 📝 ลิขสิทธิ์และการนำไปใช้
-- ข้อมูลการเงินดึงผ่าน Yahoo Finance และเชื่อมโยงหน้าข้อมูลกับ [StockAnalysis.com](https://stockanalysis.com/)
-- พัฒนาขึ้นเพื่อการติดตามพอร์ตและวิเคราะห์ข้อมูลการลงทุนส่วนตัว
+ไฟล์ `.github/workflows/update_data.yml` จะคอยรัน Python คำนวณข้อมูลอัตโนมัติทุกๆ 3 ชั่วโมงตลอด 24 ชั่วโมง และอัปเดตไฟล์ `data/stocks.json` เพื่อให้ข้อมูลพร้อมใช้งานอยู่เสมอ
